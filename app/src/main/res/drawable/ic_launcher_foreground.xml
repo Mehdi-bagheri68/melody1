@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Vinyl Disc Outer Ring -->
+        <path
+            android:fillColor="#FFB800"
+            android:pathData="M54,26 C38.54,26 26,38.54 26,54 C26,69.46 38.54,82 54,82 C69.46,82 82,69.46 82,54 C82,38.54 69.46,26 54,26 Z M54,77 C41.3,77 31,66.7 31,54 C31,41.3 41.3,31 54,31 C66.7,31 77,41.3 77,54 C77,66.7 66.7,77 54,77 Z" />
+        
+        <!-- Vinyl Inner Groove -->
+        <path
+            android:fillColor="#FF8800"
+            android:pathData="M54,37 C44.61,37 37,44.61 37,54 C37,63.39 44.61,71 54,71 C63.39,71 71,63.39 71,54 C71,44.61 63.39,37 54,37 Z M54,67 C46.82,67 41,61.18 41,54 C41,46.82 46.82,41 54,41 C61.18,41 67,46.82 67,54 C67,61.18 61.18,67 54,67 Z" />
+        
+        <!-- Center Disc -->
+        <path
+            android:fillColor="#FFB800"
+            android:pathData="M54,46 C49.58,46 46,49.58 46,54 C46,58.42 49.58,62 54,62 C58.42,62 62,58.42 62,54 C62,49.58 58.42,46 54,46 Z" />
+        
+        <!-- Musical Note in center -->
+        <path
+            android:fillColor="#0D111A"
+            android:pathData="M56,49 L56,55.5 C55.5,55.2 54.8,55 54,55 C52.3,55 51,56.1 51,57.5 C51,58.9 52.3,60 54,60 C55.6,60 57,58.8 57,57.3 L57,51 L60,51 L60,49 L56,49 Z" />
+
+        <!-- Dynamic Equalizer / Soundwaves on Left and Right -->
+        <path
+            android:fillColor="#FFC83B"
+            android:pathData="M22,48 L25,48 L25,60 L22,60 Z" />
+        <path
+            android:fillColor="#FF8800"
+            android:pathData="M17,51 L20,51 L20,57 L17,57 Z" />
+        <path
+            android:fillColor="#FFC83B"
+            android:pathData="M83,48 L86,48 L86,60 L83,60 Z" />
+        <path
+            android:fillColor="#FF8800"
+            android:pathData="M88,51 L91,51 L91,57 L88,57 Z" />
+    </group>
+</vector>

@@ -1,0 +1,6 @@
+{
+  "name": "MeloGroove",
+  "description": "Comprehensive online music player client with dynamic discovery, country preference, audio streaming, and playlists.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">MeloGroove</string>
+    <string name="tagline">موزیک پلیر آنلاین ملودی</string>
+    <string name="onboarding_title">مایلید به موسیقی کدام کشور گوش دهید؟</string>
+    <string name="onboarding_subtitle">می‌توانید بعداً در هر زمان کشور انتخابی را تغییر دهید</string>
+    <string name="continue_action">شروع تجربه موسیقی</string>
+    <string name="nav_home">خانه</string>
+    <string name="nav_search">جستجو</string>
+    <string name="nav_library">کتابخانه</string>
+    <string name="nav_drive">حالت خودرو</string>
+    <string name="nav_settings">تنظیمات</string>
+</resources>
