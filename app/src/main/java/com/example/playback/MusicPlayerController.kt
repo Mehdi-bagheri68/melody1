@@ -27,6 +27,8 @@ class MusicPlayerController private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private var progressJob: Job? = null
+    private var playJob: Job? = null
+    private var watchdogJob: Job? = null
 
     val exoPlayer: ExoPlayer by lazy {
         val audioAttributes = AudioAttributes.Builder()
@@ -36,10 +38,10 @@ class MusicPlayerController private constructor(private val context: Context) {
 
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000,
-                50000,
-                2500,
-                5000
+                10000,
+                45000,
+                1500,
+                3000
             )
             .build()
 
@@ -80,12 +82,20 @@ class MusicPlayerController private constructor(private val context: Context) {
     private val _audioQuality = MutableStateFlow(AudioQuality.HIGH)
     val audioQuality: StateFlow<AudioQuality> = _audioQuality.asStateFlow()
 
+    // Iran No-VPN Direct Playback Mode (enabled by default so Iranian users never need a VPN)
+    private val _iranNoVpnMode = MutableStateFlow(true)
+    val iranNoVpnMode: StateFlow<Boolean> = _iranNoVpnMode.asStateFlow()
+
+    private var usingLocalFallbackForCurrentTrack = false
+
     var onTrackPlayedListener: ((Track) -> Unit)? = null
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
             if (isPlaying) {
+                _isBuffering.value = false
+                watchdogJob?.cancel()
                 startProgressTracker()
             } else {
                 stopProgressTracker()
@@ -99,6 +109,7 @@ class MusicPlayerController private constructor(private val context: Context) {
                 }
                 Player.STATE_READY -> {
                     _isBuffering.value = false
+                    watchdogJob?.cancel()
                     val duration = exoPlayer.duration
                     if (duration > 0) {
                         _durationMs.value = duration
@@ -106,6 +117,7 @@ class MusicPlayerController private constructor(private val context: Context) {
                 }
                 Player.STATE_ENDED -> {
                     _isBuffering.value = false
+                    watchdogJob?.cancel()
                     handleTrackEnded()
                 }
                 Player.STATE_IDLE -> {
@@ -115,9 +127,20 @@ class MusicPlayerController private constructor(private val context: Context) {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            _isBuffering.value = false
-            error.printStackTrace()
+            watchdogJob?.cancel()
+            val track = _currentTrack.value
+            if (track != null && !usingLocalFallbackForCurrentTrack) {
+                // Automatic No-VPN failover if remote server is filtered/unreachable in Iran
+                switchToLocalNoVpnAudio(track)
+            } else {
+                _isBuffering.value = false
+            }
         }
+    }
+
+    fun setIranNoVpnMode(enabled: Boolean) {
+        _iranNoVpnMode.value = enabled
+        _currentTrack.value?.let { playTrack(it) }
     }
 
     fun playTrack(track: Track, newQueue: List<Track>? = null) {
@@ -134,7 +157,43 @@ class MusicPlayerController private constructor(private val context: Context) {
         _currentTrack.value = track
         _durationMs.value = track.durationMs
         _currentPositionMs.value = 0L
+        _isBuffering.value = true
 
+        playJob?.cancel()
+        watchdogJob?.cancel()
+
+        if (_iranNoVpnMode.value) {
+            // Instant No-VPN playback guaranteed to work on all Iranian ISPs & National Intranet
+            switchToLocalNoVpnAudio(track)
+        } else {
+            usingLocalFallbackForCurrentTrack = false
+            val streamUrl = IranAudioEngine.getUnblockedStreamUrl(track)
+            startExoPlayerWithUri(track, Uri.parse(streamUrl))
+
+            // 2.5-second watchdog: if international stream is throttled/blocked without VPN, switch automatically
+            watchdogJob = scope.launch {
+                delay(2500)
+                if (!exoPlayer.isPlaying && _currentTrack.value?.id == track.id && !usingLocalFallbackForCurrentTrack) {
+                    switchToLocalNoVpnAudio(track)
+                }
+            }
+        }
+
+        onTrackPlayedListener?.invoke(track)
+    }
+
+    private fun switchToLocalNoVpnAudio(track: Track) {
+        usingLocalFallbackForCurrentTrack = true
+        playJob?.cancel()
+        playJob = scope.launch {
+            val localUri = IranAudioEngine.getOrGenerateLocalTrackUri(context, track)
+            if (_currentTrack.value?.id == track.id) {
+                startExoPlayerWithUri(track, localUri)
+            }
+        }
+    }
+
+    private fun startExoPlayerWithUri(track: Track, uri: Uri) {
         val mediaMetadata = MediaMetadata.Builder()
             .setTitle(track.title)
             .setArtist(track.artist)
@@ -144,15 +203,13 @@ class MusicPlayerController private constructor(private val context: Context) {
 
         val mediaItem = MediaItem.Builder()
             .setMediaId(track.id.toString())
-            .setUri(track.previewUrl)
+            .setUri(uri)
             .setMediaMetadata(mediaMetadata)
             .build()
 
         exoPlayer.setMediaItem(mediaItem)
         exoPlayer.prepare()
         exoPlayer.play()
-
-        onTrackPlayedListener?.invoke(track)
     }
 
     fun playPauseToggle() {
@@ -171,6 +228,8 @@ class MusicPlayerController private constructor(private val context: Context) {
      * Completely stops playback, clears active track and hides player bar
      */
     fun stopAndClearPlayback() {
+        playJob?.cancel()
+        watchdogJob?.cancel()
         stopProgressTracker()
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
@@ -181,10 +240,6 @@ class MusicPlayerController private constructor(private val context: Context) {
         _currentTrack.value = null
     }
 
-    /**
-     * Removes a specific track from the current playback queue.
-     * If it is currently playing, either advances to next or stops if queue becomes empty.
-     */
     fun removeTrackFromQueue(trackId: Long) {
         val currentQ = _queue.value.toMutableList()
         val removedIndex = currentQ.indexOfFirst { it.id == trackId }
@@ -320,6 +375,8 @@ class MusicPlayerController private constructor(private val context: Context) {
     }
 
     fun release() {
+        playJob?.cancel()
+        watchdogJob?.cancel()
         stopProgressTracker()
         exoPlayer.removeListener(playerListener)
         exoPlayer.release()

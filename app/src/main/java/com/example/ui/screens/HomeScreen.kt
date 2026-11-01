@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -104,12 +105,27 @@ fun HomeScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
-                    Text(
-                        text = "MeloGroove",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = TextPrimary,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "MeloGroove",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = Color(0x33FFB800),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "v${com.example.BuildConfig.VERSION_NAME}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -79,7 +79,7 @@ fun ArtistDetailScreen(
     BackHandler { onBack() }
 
     val heroImage = tracks.firstOrNull()?.highResArtworkUrl
-        ?: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&q=80"
+        ?: "https://picsum.photos/seed/${artistName.hashCode()}/600/600"
 
     LazyColumn(
         modifier = Modifier
@@ -94,10 +94,12 @@ fun ArtistDetailScreen(
                     .fillMaxWidth()
                     .height(220.dp)
             ) {
-                AsyncImage(
-                    model = heroImage,
-                    contentDescription = artistName,
-                    contentScale = ContentScale.Crop,
+                com.example.ui.components.TrackArtwork(
+                    imageUrl = heroImage,
+                    seedId = artistName.hashCode().toLong(),
+                    title = artistName,
+                    subtitle = artistName,
+                    showTextOverlay = false,
                     modifier = Modifier.fillMaxSize()
                 )
 

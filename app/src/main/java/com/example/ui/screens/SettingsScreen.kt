@@ -451,7 +451,7 @@ fun SettingsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "MeloGroove Online Music Player v1.1",
+                    text = "MeloGroove Online Music Player v${com.example.BuildConfig.VERSION_NAME} (Build ${com.example.BuildConfig.VERSION_CODE})",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextTertiary
                 )

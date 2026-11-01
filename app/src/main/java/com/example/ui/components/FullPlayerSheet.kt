@@ -74,6 +74,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import com.example.data.model.AudioQuality
 import com.example.data.model.CountriesData
 import com.example.data.model.PlaybackMode
@@ -118,6 +121,7 @@ fun FullPlayerSheet(
 ) {
     if (track == null) return
     val lang = LocalAppLanguage.current
+    val dir = if (lang.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -148,131 +152,133 @@ fun FullPlayerSheet(
         dragHandle = null,
         modifier = Modifier.fillMaxSize()
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            OledSurfaceVariant,
-                            OledBackground,
-                            OledBackground
+        CompositionLocalProvider(LocalLayoutDirection provides dir) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                OledSurfaceVariant,
+                                OledBackground,
+                                OledBackground
+                            )
                         )
                     )
-                )
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
             ) {
-                // Top Header Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    IconButton(
-                        onClick = onDismiss,
+                    // Top Header Row
+                    Row(
                         modifier = Modifier
-                            .size(44.dp)
-                            .testTag("dismiss_player_btn")
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Collapse",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(30.dp)
-                        )
-                    }
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = tr(lang, "درحال پخش", "Now Playing"),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = AccentGold,
-                            fontWeight = FontWeight.Bold
-                        )
-                        val country = CountriesData.allCountries.find { it.code.equals(track.countryCode, ignoreCase = true) }
-                        if (country != null) {
-                            Text(
-                                text = "${country.flag} ${country.getDisplayName(lang)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-
-                    Row {
                         IconButton(
-                            onClick = onAddToPlaylist,
+                            onClick = onDismiss,
                             modifier = Modifier
                                 .size(44.dp)
-                                .testTag("player_add_playlist_btn")
+                                .testTag("dismiss_player_btn")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.PlaylistAdd,
-                                contentDescription = "Add to playlist",
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Collapse",
                                 tint = TextPrimary,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(30.dp)
                             )
                         }
-                        IconButton(
-                            onClick = onStopAndClear,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .testTag("player_stop_clear_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Stop,
-                                contentDescription = tr(lang, "توقف و حذف پخش", "Stop & Clear"),
-                                tint = AccentOrange,
-                                modifier = Modifier.size(24.dp)
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = tr(lang, "درحال پخش", "Now Playing"),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold
                             )
+                            val country = CountriesData.allCountries.find { it.code.equals(track.countryCode, ignoreCase = true) }
+                            if (country != null) {
+                                Text(
+                                    text = "${country.flag} ${country.getDisplayName(lang)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+
+                        Row {
+                            IconButton(
+                                onClick = onAddToPlaylist,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .testTag("player_add_playlist_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlaylistAdd,
+                                    contentDescription = "Add to playlist",
+                                    tint = TextPrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = onStopAndClear,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .testTag("player_stop_clear_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = tr(lang, "توقف و حذف پخش", "Stop & Clear"),
+                                    tint = AccentOrange,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
                     }
-                }
 
-                // Vinyl Disc Artwork Section
-                Box(
-                    modifier = Modifier
-                        .size(220.dp)
-                        .shadow(16.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(Color(0xFF0A0D14))
-                        .border(4.dp, BorderHighlight, CircleShape)
-                        .rotate(if (isPlaying) rotationAngle else 0f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawCircle(color = Color(0xFF141923), radius = size.minDimension / 2.1f)
-                        drawCircle(color = Color(0xFF1B2230), radius = size.minDimension / 2.3f)
-                        drawCircle(color = Color(0xFF0F141E), radius = size.minDimension / 2.7f)
-                    }
-
-                    AsyncImage(
-                        model = track.highResArtworkUrl,
-                        contentDescription = track.title,
-                        modifier = Modifier
-                            .size(110.dp)
-                            .clip(CircleShape)
-                            .border(2.dp, AccentGold, CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-
+                    // Vinyl Disc Artwork Section
                     Box(
                         modifier = Modifier
-                            .size(18.dp)
+                            .size(220.dp)
+                            .shadow(16.dp, CircleShape)
                             .clip(CircleShape)
-                            .background(OledBackground)
-                            .border(2.dp, AccentOrange, CircleShape)
-                    )
-                }
+                            .background(Color(0xFF0A0D14))
+                            .border(4.dp, BorderHighlight, CircleShape)
+                            .rotate(if (isPlaying) rotationAngle else 0f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            drawCircle(color = Color(0xFF141923), radius = size.minDimension / 2.1f)
+                            drawCircle(color = Color(0xFF1B2230), radius = size.minDimension / 2.3f)
+                            drawCircle(color = Color(0xFF0F141E), radius = size.minDimension / 2.7f)
+                        }
+
+                        TrackArtwork(
+                            imageUrl = track.highResArtworkUrl,
+                            seedId = track.id,
+                            title = track.title,
+                            showTextOverlay = false,
+                            modifier = Modifier
+                                .size(110.dp)
+                                .clip(CircleShape)
+                                .border(2.dp, AccentGold, CircleShape)
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .background(OledBackground)
+                                .border(2.dp, AccentOrange, CircleShape)
+                        )
+                    }
 
                 // Track Title and Clickable Artist Details
                 Column(
@@ -542,6 +548,7 @@ fun FullPlayerSheet(
                     }
                 }
             }
+        }
         }
     }
 }

@@ -76,9 +76,27 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Immediately set native window layout direction on frame 0 before Compose renders
+        val initialRtl = viewModel.appLanguage.value.isRtl
+        window.decorView.layoutDirection =
+            if (initialRtl) android.view.View.LAYOUT_DIRECTION_RTL else android.view.View.LAYOUT_DIRECTION_LTR
+
         setContent {
-            MeloGrooveTheme {
-                MeloGrooveMainContent(viewModel)
+            val appLanguage by viewModel.appLanguage.collectAsState()
+            val layoutDirection = if (appLanguage.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+
+            androidx.compose.runtime.SideEffect {
+                window.decorView.layoutDirection =
+                    if (appLanguage.isRtl) android.view.View.LAYOUT_DIRECTION_RTL else android.view.View.LAYOUT_DIRECTION_LTR
+            }
+
+            CompositionLocalProvider(
+                LocalLayoutDirection provides layoutDirection,
+                LocalAppLanguage provides appLanguage
+            ) {
+                MeloGrooveTheme {
+                    MeloGrooveMainContent(viewModel)
+                }
             }
         }
     }

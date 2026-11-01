@@ -46,15 +46,20 @@ class MainViewModel : ViewModel() {
     )
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
 
-    private val _selectedCountry = MutableStateFlow(
-        CountriesData.getCountryByCode(userPreferences.selectedCountryCode.value)
-    )
+    private val initialCountry = CountriesData.getCountryByCode(userPreferences.selectedCountryCode.value)
+
+    private val _selectedCountry = MutableStateFlow(initialCountry)
     val selectedCountry: StateFlow<Country> = _selectedCountry.asStateFlow()
 
-    private val _trendingTracks = MutableStateFlow<List<Track>>(emptyList())
+    // Synchronously initialized on frame 0 so there is zero empty state or LTR/RTL layout jump!
+    private val _trendingTracks = MutableStateFlow<List<Track>>(
+        repository.getInitialTrendingSync(initialCountry)
+    )
     val trendingTracks: StateFlow<List<Track>> = _trendingTracks.asStateFlow()
 
-    private val _newReleaseTracks = MutableStateFlow<List<Track>>(emptyList())
+    private val _newReleaseTracks = MutableStateFlow<List<Track>>(
+        repository.getInitialNewReleasesSync(initialCountry)
+    )
     val newReleaseTracks: StateFlow<List<Track>> = _newReleaseTracks.asStateFlow()
 
     private val _isLoadingTrending = MutableStateFlow(false)
@@ -124,6 +129,7 @@ class MainViewModel : ViewModel() {
     val durationMs: StateFlow<Long> = playerController.durationMs
     val playbackMode: StateFlow<PlaybackMode> = playerController.playbackMode
     val audioQuality: StateFlow<AudioQuality> = playerController.audioQuality
+    val iranNoVpnMode: StateFlow<Boolean> = playerController.iranNoVpnMode
     val queue: StateFlow<List<Track>> = playerController.queue
 
     // Dialog & Sheet States
@@ -147,6 +153,10 @@ class MainViewModel : ViewModel() {
 
     fun setAppLanguage(language: AppLanguage) {
         userPreferences.setAppLanguage(language)
+    }
+
+    fun setIranNoVpnMode(enabled: Boolean) {
+        playerController.setIranNoVpnMode(enabled)
     }
 
     fun navigateTo(screen: Screen) {
@@ -180,20 +190,24 @@ class MainViewModel : ViewModel() {
         userPreferences.setSelectedCountryCode(country.code)
         userPreferences.setOnboardingCompleted(true)
         _selectedCountry.value = country
-        loadTrendingForCountry(country)
+        // Populate synchronously before switching screen so HomeScreen renders in RTL with full data on frame 0
+        _trendingTracks.value = repository.getInitialTrendingSync(country)
+        _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
         _currentScreen.value = Screen.Home
+        loadTrendingForCountry(country)
     }
 
     fun selectCountry(country: Country) {
         userPreferences.setSelectedCountryCode(country.code)
         _selectedCountry.value = country
-        loadTrendingForCountry(country)
+        _trendingTracks.value = repository.getInitialTrendingSync(country)
+        _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
         _isCountryPickerVisible.value = false
+        loadTrendingForCountry(country)
     }
 
     fun loadTrendingForCountry(country: Country) {
         viewModelScope.launch {
-            _isLoadingTrending.value = true
             val tracks = repository.getTrendingForCountry(country)
             _trendingTracks.value = tracks
             val newest = repository.getNewReleasesForCountry(country)
@@ -219,35 +233,31 @@ class MainViewModel : ViewModel() {
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query
         searchJob?.cancel()
-        if (query.isBlank()) {
+        if (query.isBlank() && _searchGenreFilter.value == null && _searchYearFilter.value == null) {
             _searchResults.value = emptyList()
             _isSearching.value = false
             return
         }
 
         searchJob = viewModelScope.launch {
-            delay(350)
+            delay(200)
             executeSearch(query)
         }
     }
 
     fun setGenreFilter(genre: String?) {
         _searchGenreFilter.value = genre
-        if (_searchQuery.value.isNotBlank()) {
-            viewModelScope.launch { executeSearch(_searchQuery.value) }
-        }
+        viewModelScope.launch { executeSearch(_searchQuery.value) }
     }
 
     fun setYearFilter(year: String?) {
         _searchYearFilter.value = year
-        if (_searchQuery.value.isNotBlank()) {
-            viewModelScope.launch { executeSearch(_searchQuery.value) }
-        }
+        viewModelScope.launch { executeSearch(_searchQuery.value) }
     }
 
     fun setSearchCountryFilter(code: String?) {
         _searchCountryFilter.value = code
-        if (_searchQuery.value.isNotBlank()) {
+        if (_searchQuery.value.isNotBlank() || _searchGenreFilter.value != null || _searchYearFilter.value != null) {
             viewModelScope.launch { executeSearch(_searchQuery.value) }
         }
     }

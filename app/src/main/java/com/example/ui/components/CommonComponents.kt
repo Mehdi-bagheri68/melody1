@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,11 +29,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -59,6 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,13 +73,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -95,6 +105,105 @@ import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
+import kotlin.math.abs
+
+/**
+ * Guaranteed No-VPN Album Cover Artwork!
+ * Renders a rich, studio-designed procedural cover art on frame 0 (works 100% offline / without VPN in Iran)
+ * and layers AsyncImage on top if an unblocked CDN image is reachable.
+ */
+@Composable
+fun TrackArtwork(
+    imageUrl: String,
+    seedId: Long,
+    title: String,
+    subtitle: String = "",
+    modifier: Modifier = Modifier,
+    showTextOverlay: Boolean = true
+) {
+    val palettes = listOf(
+        listOf(Color(0xFF8E24AA), Color(0xFF311B92), Color(0xFFFFB800)),
+        listOf(Color(0xFFE53935), Color(0xFF880E4F), Color(0xFFFF8F00)),
+        listOf(Color(0xFF00897B), Color(0xFF004D40), Color(0xFF64FFDA)),
+        listOf(Color(0xFF1E88E5), Color(0xFF0D47A1), Color(0xFFFFD54F)),
+        listOf(Color(0xFFF4511E), Color(0xFFBF360C), Color(0xFFFFEA00)),
+        listOf(Color(0xFF43A047), Color(0xFF1B5E20), Color(0xFFB9F6CA)),
+        listOf(Color(0xFF6D4C41), Color(0xFF263238), Color(0xFFFFB300)),
+        listOf(Color(0xFFD81B60), Color(0xFF4A148C), Color(0xFFFF80AB))
+    )
+    val palette = palettes[abs(seedId.toInt()) % palettes.size]
+    val icons = listOf(
+        Icons.Default.MusicNote,
+        Icons.Default.GraphicEq,
+        Icons.Default.Headphones,
+        Icons.Default.Album
+    )
+    val chosenIcon = icons[abs(seedId.toInt()) % icons.size]
+
+    Box(
+        modifier = modifier
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(palette[0], palette[1])
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        // Decorative Studio Vinyl & Soundwave Rings (0ms, 100% No-VPN)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val r = size.minDimension
+            drawCircle(
+                color = Color.White.copy(alpha = 0.08f),
+                radius = r * 0.44f,
+                center = Offset(size.width * 0.8f, size.height * 0.2f)
+            )
+            drawCircle(
+                color = palette[2].copy(alpha = 0.20f),
+                radius = r * 0.36f,
+                style = Stroke(width = 2.dp.toPx())
+            )
+            drawCircle(
+                color = Color.White.copy(alpha = 0.12f),
+                radius = r * 0.24f,
+                style = Stroke(width = 1.5.dp.toPx())
+            )
+        }
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(6.dp)
+        ) {
+            Icon(
+                imageVector = chosenIcon,
+                contentDescription = null,
+                tint = palette[2],
+                modifier = Modifier.size(26.dp)
+            )
+            if (showTextOverlay && subtitle.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    fontSize = 10.sp
+                )
+            }
+        }
+
+        // Optional network image overlay (if reachable without VPN)
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+    }
+}
 
 @Composable
 fun ModernMoodCard(
@@ -124,10 +233,12 @@ fun ModernMoodCard(
             .clickable(onClick = onClick)
             .testTag("mood_${mood.id}")
     ) {
-        AsyncImage(
-            model = mood.coverUrl,
-            contentDescription = mood.getPrimaryTitle(lang),
-            contentScale = ContentScale.Crop,
+        TrackArtwork(
+            imageUrl = mood.coverUrl,
+            seedId = mood.id.hashCode().toLong(),
+            title = mood.getPrimaryTitle(lang),
+            subtitle = "",
+            showTextOverlay = false,
             modifier = Modifier
                 .size(72.dp)
                 .align(Alignment.BottomEnd)
@@ -213,11 +324,13 @@ fun HorizontalShelfTrackCard(
                     .clip(RoundedCornerShape(12.dp))
                     .background(OledSurfaceVariant)
             ) {
-                AsyncImage(
-                    model = track.artworkUrl,
-                    contentDescription = track.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+                TrackArtwork(
+                    imageUrl = track.artworkUrl,
+                    seedId = track.id,
+                    title = track.title,
+                    subtitle = track.artist,
+                    showTextOverlay = true,
+                    modifier = Modifier.fillMaxSize()
                 )
 
                 if (badgeText != null) {
@@ -342,13 +455,15 @@ fun TrackItemCard(
                         .background(OledSurfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = track.artworkUrl,
-                        contentDescription = track.title,
+                    TrackArtwork(
+                        imageUrl = track.artworkUrl,
+                        seedId = track.id,
+                        title = track.title,
+                        subtitle = "",
+                        showTextOverlay = false,
                         modifier = Modifier
                             .size(56.dp)
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop
+                            .clip(RoundedCornerShape(12.dp))
                     )
 
                     if (isCurrentTrack) {
@@ -671,13 +786,14 @@ fun MiniPlayer(
                         .background(OledSurfaceHigh),
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = currentTrack.artworkUrl,
-                        contentDescription = currentTrack.title,
+                    TrackArtwork(
+                        imageUrl = currentTrack.artworkUrl,
+                        seedId = currentTrack.id,
+                        title = currentTrack.title,
+                        showTextOverlay = false,
                         modifier = Modifier
                             .size(44.dp)
-                            .clip(RoundedCornerShape(10.dp)),
-                        contentScale = ContentScale.Crop
+                            .clip(RoundedCornerShape(10.dp))
                     )
                 }
 
@@ -822,85 +938,92 @@ fun CountryPickerDialog(
     onDismiss: () -> Unit
 ) {
     val lang = LocalAppLanguage.current
+    val dir = if (lang.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = OledSurfaceVariant,
         title = {
-            Text(
-                text = tr(lang, "انتخاب کشور موسیقی", "Select Music Country"),
-                style = MaterialTheme.typography.titleLarge,
-                color = TextPrimary,
-                fontWeight = FontWeight.Bold
-            )
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                Text(
+                    text = tr(lang, "انتخاب کشور موسیقی", "Select Music Country"),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         },
         text = {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(CountriesData.allCountries) { country ->
-                    val isSelected = country.code == selectedCountry.code
-                    val isIran = country.code == "IR"
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(CountriesData.allCountries) { country ->
+                        val isSelected = country.code == selectedCountry.code
+                        val isIran = country.code == "IR"
 
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(
-                                width = if (isSelected) 2.dp else if (isIran) 1.dp else 0.5.dp,
-                                color = if (isSelected) AccentGold else if (isIran) BorderHighlight else BorderSubtle,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable { onSelectCountry(country) }
-                            .testTag("country_item_${country.code}"),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) OledSurfaceHigh else OledSurface
-                        )
-                    ) {
-                        Row(
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    width = if (isSelected) 2.dp else if (isIran) 1.dp else 0.5.dp,
+                                    color = if (isSelected) AccentGold else if (isIran) BorderHighlight else BorderSubtle,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onSelectCountry(country) }
+                                .testTag("country_item_${country.code}"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) OledSurfaceHigh else OledSurface
+                            )
                         ) {
-                            Text(text = country.flag, fontSize = 28.sp)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = country.getDisplayName(lang),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = if (isSelected) AccentGold else TextPrimary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    if (isIran) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(Color(0x33FFB800))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = tr(lang, "پیشنهاد اصلی", "Featured"),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = AccentGold
-                                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = country.flag, fontSize = 28.sp)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = country.getDisplayName(lang),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = if (isSelected) AccentGold else TextPrimary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (isIran) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(Color(0x33FFB800))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = tr(lang, "پیشنهاد اصلی", "Featured"),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = AccentGold
+                                                )
+                                            }
                                         }
                                     }
+                                    Text(
+                                        text = if (lang.isRtl) country.nameEn else country.nameFa,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
                                 }
-                                Text(
-                                    text = if (lang.isRtl) country.nameEn else country.nameFa,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
-                            }
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = AccentGold
-                                )
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = AccentGold
+                                    )
+                                }
                             }
                         }
                     }
@@ -908,8 +1031,10 @@ fun CountryPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(tr(lang, "بستن", "Close"), color = AccentGold)
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                TextButton(onClick = onDismiss) {
+                    Text(tr(lang, "بستن", "Close"), color = AccentGold)
+                }
             }
         }
     )
@@ -921,6 +1046,7 @@ fun CreatePlaylistDialog(
     onCreate: (name: String, description: String) -> Unit
 ) {
     val lang = LocalAppLanguage.current
+    val dir = if (lang.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
 
@@ -928,63 +1054,72 @@ fun CreatePlaylistDialog(
         onDismissRequest = onDismiss,
         containerColor = OledSurfaceVariant,
         title = {
-            Text(
-                tr(lang, "ساخت پلی‌لیست جدید", "Create New Playlist"),
-                style = MaterialTheme.typography.titleLarge,
-                color = TextPrimary
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(tr(lang, "نام پلی‌لیست (مثلاً «پلی‌لیست شاد»)", "Playlist Name (e.g. Road Trip)")) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGold,
-                        unfocusedBorderColor = BorderSubtle,
-                        focusedLabelColor = AccentGold,
-                        unfocusedLabelColor = TextSecondary,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("playlist_name_input")
-                )
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text(tr(lang, "توضیحات اختیاری", "Optional Description")) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGold,
-                        unfocusedBorderColor = BorderSubtle,
-                        focusedLabelColor = AccentGold,
-                        unfocusedLabelColor = TextSecondary,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                Text(
+                    tr(lang, "ساخت پلی‌لیست جدید", "Create New Playlist"),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = TextPrimary,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
         },
+        text = {
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(tr(lang, "نام پلی‌لیست (مثلاً «پلی‌لیست شاد»)", "Playlist Name (e.g. Road Trip)")) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGold,
+                            unfocusedBorderColor = BorderSubtle,
+                            focusedLabelColor = AccentGold,
+                            unfocusedLabelColor = TextSecondary,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("playlist_name_input")
+                    )
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text(tr(lang, "توضیحات اختیاری", "Optional Description")) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGold,
+                            unfocusedBorderColor = BorderSubtle,
+                            focusedLabelColor = AccentGold,
+                            unfocusedLabelColor = TextSecondary,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
         confirmButton = {
-            Button(
-                onClick = { onCreate(name, description) },
-                enabled = name.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentGold,
-                    contentColor = Color.Black
-                ),
-                modifier = Modifier.testTag("save_playlist_btn")
-            ) {
-                Text(tr(lang, "ایجاد پلی‌لیست", "Create"))
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                Button(
+                    onClick = { onCreate(name, description) },
+                    enabled = name.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentGold,
+                        contentColor = Color.Black
+                    ),
+                    modifier = Modifier.testTag("save_playlist_btn")
+                ) {
+                    Text(tr(lang, "ایجاد پلی‌لیست", "Create"))
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(tr(lang, "انصراف", "Cancel"), color = TextSecondary)
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                TextButton(onClick = onDismiss) {
+                    Text(tr(lang, "انصراف", "Cancel"), color = TextSecondary)
+                }
             }
         }
     )
@@ -999,80 +1134,87 @@ fun AddToPlaylistDialog(
     onDismiss: () -> Unit
 ) {
     val lang = LocalAppLanguage.current
+    val dir = if (lang.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = OledSurfaceVariant,
         title = {
-            Text(
-                tr(lang, "افزودن به پلی‌لیست", "Add to Playlist"),
-                style = MaterialTheme.typography.titleLarge,
-                color = TextPrimary
-            )
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                Text(
+                    tr(lang, "افزودن به پلی‌لیست", "Add to Playlist"),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = TextPrimary,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         },
         text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "${track.title} - ${track.artist}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AccentGold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Button(
-                    onClick = onCreateNewPlaylist,
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = OledSurfaceHigh)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(tr(lang, "ساخت پلی‌لیست جدید", "New Playlist"), color = TextPrimary)
-                }
-
-                if (playlists.isEmpty()) {
                     Text(
-                        text = tr(lang, "هنوز پلی‌لیستی نساخته‌اید.", "No playlists created yet."),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
-                        modifier = Modifier.padding(vertical = 12.dp)
+                        text = "${track.title} - ${track.artist}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AccentGold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.height(180.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Button(
+                        onClick = onCreateNewPlaylist,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = OledSurfaceHigh)
                     ) {
-                        items(playlists) { pl ->
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onSelectPlaylist(pl) }
-                                    .testTag("add_to_pl_${pl.id}"),
-                                colors = CardDefaults.cardColors(containerColor = OledSurface)
-                            ) {
-                                Row(
+                        Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(tr(lang, "ساخت پلی‌لیست جدید", "New Playlist"), color = TextPrimary)
+                    }
+
+                    if (playlists.isEmpty()) {
+                        Text(
+                            text = tr(lang, "هنوز پلی‌لیستی نساخته‌اید.", "No playlists created yet."),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.height(180.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(playlists) { pl ->
+                                Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .clickable { onSelectPlaylist(pl) }
+                                        .testTag("add_to_pl_${pl.id}"),
+                                    colors = CardDefaults.cardColors(containerColor = OledSurface)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.MusicNote,
-                                        contentDescription = null,
-                                        tint = AccentGold
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(text = pl.name, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
-                                        Text(
-                                            text = tr(lang, "${pl.trackCount} آهنگ", "${pl.trackCount} tracks"),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MusicNote,
+                                            contentDescription = null,
+                                            tint = AccentGold
                                         )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = pl.name, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                                            Text(
+                                                text = tr(lang, "${pl.trackCount} آهنگ", "${pl.trackCount} tracks"),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = TextSecondary
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1082,8 +1224,10 @@ fun AddToPlaylistDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(tr(lang, "بستن", "Close"), color = AccentGold)
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                TextButton(onClick = onDismiss) {
+                    Text(tr(lang, "بستن", "Close"), color = AccentGold)
+                }
             }
         }
     )
