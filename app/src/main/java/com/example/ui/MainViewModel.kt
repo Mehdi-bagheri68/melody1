@@ -3,6 +3,8 @@ package com.example.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.MeloGrooveApp
+import com.example.data.model.AppLanguage
+import com.example.data.model.ArtistSortOption
 import com.example.data.model.AudioQuality
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
@@ -27,6 +29,7 @@ sealed class Screen(val route: String) {
     object Driving : Screen("driving")
     object Settings : Screen("settings")
     data class PlaylistDetail(val playlist: Playlist) : Screen("playlist_detail")
+    data class ArtistDetail(val artistName: String) : Screen("artist_detail")
 }
 
 class MainViewModel : ViewModel() {
@@ -35,6 +38,8 @@ class MainViewModel : ViewModel() {
     private val repository = app.repository
     private val userPreferences = app.userPreferences
     private val playerController = app.playerController
+
+    val appLanguage: StateFlow<AppLanguage> = userPreferences.appLanguage
 
     private val _currentScreen = MutableStateFlow<Screen>(
         if (userPreferences.onboardingCompleted.value) Screen.Home else Screen.Onboarding
@@ -48,6 +53,9 @@ class MainViewModel : ViewModel() {
 
     private val _trendingTracks = MutableStateFlow<List<Track>>(emptyList())
     val trendingTracks: StateFlow<List<Track>> = _trendingTracks.asStateFlow()
+
+    private val _newReleaseTracks = MutableStateFlow<List<Track>>(emptyList())
+    val newReleaseTracks: StateFlow<List<Track>> = _newReleaseTracks.asStateFlow()
 
     private val _isLoadingTrending = MutableStateFlow(false)
     val isLoadingTrending: StateFlow<Boolean> = _isLoadingTrending.asStateFlow()
@@ -75,6 +83,19 @@ class MainViewModel : ViewModel() {
 
     private val _isLoadingMood = MutableStateFlow(false)
     val isLoadingMood: StateFlow<Boolean> = _isLoadingMood.asStateFlow()
+
+    // Artist Discography State
+    private val _selectedArtistName = MutableStateFlow<String?>(null)
+    val selectedArtistName: StateFlow<String?> = _selectedArtistName.asStateFlow()
+
+    private val _artistTracks = MutableStateFlow<List<Track>>(emptyList())
+    val artistTracks: StateFlow<List<Track>> = _artistTracks.asStateFlow()
+
+    private val _artistSortOption = MutableStateFlow(ArtistSortOption.TRENDING)
+    val artistSortOption: StateFlow<ArtistSortOption> = _artistSortOption.asStateFlow()
+
+    private val _isLoadingArtist = MutableStateFlow(false)
+    val isLoadingArtist: StateFlow<Boolean> = _isLoadingArtist.asStateFlow()
 
     // Search state
     private val _searchQuery = MutableStateFlow("")
@@ -124,8 +145,35 @@ class MainViewModel : ViewModel() {
         loadTrendingForCountry(_selectedCountry.value)
     }
 
+    fun setAppLanguage(language: AppLanguage) {
+        userPreferences.setAppLanguage(language)
+    }
+
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
+    }
+
+    fun openArtistDetail(artistName: String) {
+        _selectedArtistName.value = artistName
+        _isFullPlayerExpanded.value = false
+        _currentScreen.value = Screen.ArtistDetail(artistName)
+        loadArtistTracks(artistName, _artistSortOption.value)
+    }
+
+    fun setArtistSortOption(sortOption: ArtistSortOption) {
+        _artistSortOption.value = sortOption
+        _selectedArtistName.value?.let { artist ->
+            loadArtistTracks(artist, sortOption)
+        }
+    }
+
+    private fun loadArtistTracks(artistName: String, sortOption: ArtistSortOption) {
+        viewModelScope.launch {
+            _isLoadingArtist.value = true
+            val tracks = repository.getTracksByArtist(artistName, sortOption)
+            _artistTracks.value = tracks
+            _isLoadingArtist.value = false
+        }
     }
 
     fun completeOnboarding(country: Country) {
@@ -148,6 +196,8 @@ class MainViewModel : ViewModel() {
             _isLoadingTrending.value = true
             val tracks = repository.getTrendingForCountry(country)
             _trendingTracks.value = tracks
+            val newest = repository.getNewReleasesForCountry(country)
+            _newReleaseTracks.value = newest
             _isLoadingTrending.value = false
         }
     }
@@ -176,7 +226,7 @@ class MainViewModel : ViewModel() {
         }
 
         searchJob = viewModelScope.launch {
-            delay(400) // Debounce typing
+            delay(350)
             executeSearch(query)
         }
     }
@@ -223,6 +273,18 @@ class MainViewModel : ViewModel() {
         playerController.playPauseToggle()
     }
 
+    fun stopAndClearPlayback() {
+        _isFullPlayerExpanded.value = false
+        playerController.stopAndClearPlayback()
+    }
+
+    fun removeTrackFromQueue(trackId: Long) {
+        playerController.removeTrackFromQueue(trackId)
+        if (playerController.currentTrack.value == null) {
+            _isFullPlayerExpanded.value = false
+        }
+    }
+
     fun skipNext() {
         playerController.skipNext()
     }
@@ -237,6 +299,10 @@ class MainViewModel : ViewModel() {
 
     fun togglePlaybackMode() {
         playerController.togglePlaybackMode()
+    }
+
+    fun setPlaybackMode(mode: PlaybackMode) {
+        playerController.setPlaybackMode(mode)
     }
 
     fun setAudioQuality(quality: AudioQuality) {

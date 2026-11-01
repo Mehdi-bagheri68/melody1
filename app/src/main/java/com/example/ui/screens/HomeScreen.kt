@@ -24,11 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,38 +34,34 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.example.data.model.AppLanguage
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
 import com.example.data.model.MoodCategory
 import com.example.data.model.Track
+import com.example.ui.AppStrings.tr
+import com.example.ui.LocalAppLanguage
+import com.example.ui.components.HorizontalShelfTrackCard
+import com.example.ui.components.ModernMoodCard
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.TrackItemCard
 import com.example.ui.theme.AccentGold
-import com.example.ui.theme.AccentOrange
 import com.example.ui.theme.BorderHighlight
-import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.OledBackground
-import com.example.ui.theme.OledSurface
-import com.example.ui.theme.OledSurfaceHigh
 import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
-import com.example.ui.theme.TextTertiary
 import java.util.Calendar
 
 @Composable
 fun HomeScreen(
     selectedCountry: Country,
     trendingTracks: List<Track>,
+    newReleaseTracks: List<Track>,
     isLoadingTrending: Boolean,
     recentHistory: List<Track>,
     activeMood: MoodCategory?,
@@ -83,19 +74,22 @@ fun HomeScreen(
     onDriveClick: () -> Unit,
     onMoodClick: (MoodCategory) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onArtistClick: (String) -> Unit,
+    onStopTrackClick: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit
 ) {
-    val greeting = rememberGreeting()
+    val lang = LocalAppLanguage.current
+    val greeting = rememberGreeting(lang)
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(OledBackground)
             .statusBarsPadding(),
-        contentPadding = PaddingValues(bottom = 120.dp)
+        contentPadding = PaddingValues(bottom = 130.dp)
     ) {
-        // Top App Bar / Greeting
+        // Top App Bar / Greeting + Country Switcher + Car Mode Icon
         item {
             Row(
                 modifier = Modifier
@@ -111,10 +105,10 @@ fun HomeScreen(
                         color = TextSecondary
                     )
                     Text(
-                        text = "موزیک پلیر MeloGroove",
-                        style = MaterialTheme.typography.headlineSmall,
+                        text = "MeloGroove",
+                        style = MaterialTheme.typography.headlineMedium,
                         color = TextPrimary,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
 
@@ -135,7 +129,7 @@ fun HomeScreen(
                             Text(text = selectedCountry.flag, fontSize = 16.sp)
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = selectedCountry.nameFa,
+                                text = selectedCountry.getDisplayName(lang),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = AccentGold,
                                 fontWeight = FontWeight.Bold
@@ -145,7 +139,7 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Car Mode Shortcut
+                    // Car Mode Shortcut (Top-Bar next to Country Selector)
                     IconButton(
                         onClick = onDriveClick,
                         modifier = Modifier
@@ -156,7 +150,7 @@ fun HomeScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.DirectionsCar,
-                            contentDescription = "Driving Mode",
+                            contentDescription = tr(lang, "حالت رانندگی", "Driving Mode"),
                             tint = AccentGold,
                             modifier = Modifier.size(20.dp)
                         )
@@ -165,47 +159,36 @@ fun HomeScreen(
             }
         }
 
-        // Moods & Activities Carousel
+        // 1. Modern 2-Column Explore & Moods Grid
         item {
-            Column(modifier = Modifier.padding(top = 8.dp)) {
+            Column(modifier = Modifier.padding(top = 4.dp)) {
                 SectionHeader(
-                    title = "مودها و فعالیت‌ها",
-                    subtitle = "پلی‌لیست‌های هوشمند متناسب با حس و حال شما"
+                    title = tr(lang, "کشف و مودها", "Explore & Moods"),
+                    subtitle = tr(lang, "بروزترین‌ها و پلی‌لیست‌های موضوعی", "New releases & curated mood playlists")
                 )
 
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                val moods = CountriesData.moodCategories
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(CountriesData.moodCategories) { mood ->
-                        val isSelected = activeMood?.id == mood.id
-
-                        Card(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .border(
-                                    width = if (isSelected) 1.5.dp else 1.dp,
-                                    color = if (isSelected) AccentGold else BorderSubtle,
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                .clickable { onMoodClick(mood) }
-                                .testTag("mood_${mood.id}"),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) OledSurfaceHigh else OledSurface
-                            )
+                    moods.chunked(2).forEach { rowMoods ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(text = mood.iconEmoji, fontSize = 20.sp)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = mood.titleFa,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (isSelected) AccentGold else TextPrimary,
-                                    fontWeight = FontWeight.SemiBold
+                            rowMoods.forEach { mood ->
+                                ModernMoodCard(
+                                    mood = mood,
+                                    isSelected = activeMood?.id == mood.id,
+                                    onClick = { onMoodClick(mood) },
+                                    modifier = Modifier.weight(1f)
                                 )
+                            }
+                            if (rowMoods.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
@@ -213,13 +196,21 @@ fun HomeScreen(
             }
         }
 
-        // Active Mood Tracks (if mood selected)
+        // Active Mood Tracks (if a Mood or "بروزترین‌ها" is selected)
         if (activeMood != null) {
             item {
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(18.dp))
                 SectionHeader(
-                    title = "موزیک‌های ${activeMood.titleFa} ${activeMood.iconEmoji}",
-                    subtitle = "منتخب بر اساس سلیقه شما"
+                    title = tr(
+                        lang,
+                        "لیست ${activeMood.titleFa}",
+                        "${activeMood.titleEn} Playlist"
+                    ),
+                    subtitle = tr(
+                        lang,
+                        "پخش خودکار پشت سر هم تمام آهنگ‌های این بخش",
+                        "Continuous auto-play queue for this category"
+                    )
                 )
             }
 
@@ -235,7 +226,7 @@ fun HomeScreen(
                     }
                 }
             } else {
-                items(moodTracks.take(8)) { track ->
+                items(moodTracks) { track ->
                     Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         TrackItemCard(
                             track = track,
@@ -243,101 +234,63 @@ fun HomeScreen(
                             isCurrentTrack = currentTrack?.id == track.id,
                             onTrackClick = { onTrackClick(track, moodTracks) },
                             onToggleFavorite = { onToggleFavorite(track) },
-                            onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                            onAddToPlaylistClick = { onAddToPlaylistClick(track) },
+                            onArtistClick = onArtistClick,
+                            onStopTrackClick = onStopTrackClick
                         )
                     }
                 }
             }
         }
 
-        // Recently Played Horizontal Shelf (if exists)
-        if (recentHistory.isNotEmpty()) {
+        // 2. Just Released / Newest Tracks Shelf (بروزترین انتشارها - Horizontal Carousel)
+        if (newReleaseTracks.isNotEmpty()) {
             item {
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(22.dp))
                 SectionHeader(
-                    title = "اخیراً گوش داده‌اید",
-                    subtitle = "ادامه پخش آخرین آهنگ‌ها"
+                    title = tr(lang, "بروزترین انتشارها", "Just Released"),
+                    subtitle = tr(
+                        lang,
+                        "جدیدترین آهنگ‌های منتشر شده (${newReleaseTracks.firstOrNull()?.releaseYear ?: "2026"})",
+                        "Latest songs sorted by release year"
+                    )
                 )
 
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(recentHistory.take(10)) { track ->
-                        Card(
-                            modifier = Modifier
-                                .width(140.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-                                .clickable { onTrackClick(track, recentHistory) },
-                            colors = CardDefaults.cardColors(containerColor = OledSurface)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(120.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(OledSurfaceVariant),
-                                    contentAlignment = Alignment.BottomEnd
-                                ) {
-                                    AsyncImage(
-                                        model = track.artworkUrl,
-                                        contentDescription = track.title,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(6.dp)
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(AccentGold),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PlayArrow,
-                                            contentDescription = "Play",
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Text(
-                                    text = track.title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = track.artist,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
+                    items(newReleaseTracks) { track ->
+                        HorizontalShelfTrackCard(
+                            track = track,
+                            badgeText = "NEW ${track.releaseYear}",
+                            isCurrentTrack = currentTrack?.id == track.id,
+                            isPlaying = isPlaying && currentTrack?.id == track.id,
+                            onTrackClick = { onTrackClick(track, newReleaseTracks) },
+                            onArtistClick = onArtistClick
+                        )
                     }
                 }
             }
         }
 
-        // Smart Recommendations & Trending Section for Selected Country
+        // 3. Trending & Popular Section directly under New Releases in the EXACT SAME Horizontal Carousel Format!
         item {
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(22.dp))
             SectionHeader(
-                title = "ترندترین‌های ${selectedCountry.nameFa} ${selectedCountry.flag}",
-                subtitle = "محبوب‌ترین آهنگ‌های درحال پخش در این کشور"
+                title = tr(
+                    lang,
+                    "پرطرفدارها و ترند ${selectedCountry.nameFa} ${selectedCountry.flag}",
+                    "Trending in ${selectedCountry.nameEn} ${selectedCountry.flag}"
+                ),
+                subtitle = tr(
+                    lang,
+                    "محبوب‌ترین آهنگ‌های روز • برای آرشیو خواننده روی نام او بزنید",
+                    "Most popular tracks • Tap artist name for full discography"
+                )
             )
-        }
 
-        if (isLoadingTrending) {
-            item {
+            if (isLoadingTrending) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -346,35 +299,54 @@ fun HomeScreen(
                 ) {
                     CircularProgressIndicator(color = AccentGold)
                 }
+            } else {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    itemsIndexed(trendingTracks) { index, track ->
+                        HorizontalShelfTrackCard(
+                            track = track,
+                            badgeText = "🔥 #${index + 1}",
+                            isCurrentTrack = currentTrack?.id == track.id,
+                            isPlaying = isPlaying && currentTrack?.id == track.id,
+                            onTrackClick = { onTrackClick(track, trendingTracks) },
+                            onArtistClick = onArtistClick
+                        )
+                    }
+                }
             }
-        } else {
-            itemsIndexed(trendingTracks) { index, track ->
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    TrackItemCard(
+        }
+
+        // 4. Recently Played Section (اخیر شنیده‌ها) right below Trending in the exact same Horizontal Shelf Format!
+        item {
+            Spacer(modifier = Modifier.height(22.dp))
+            SectionHeader(
+                title = tr(lang, "اخیر شنیده‌ها", "Recently Played"),
+                subtitle = tr(
+                    lang,
+                    "ادامه پخش آخرین آهنگ‌هایی که گوش داده‌اید",
+                    "Pick up right where you left off"
+                )
+            )
+
+            val displayRecent = if (recentHistory.isNotEmpty()) recentHistory else trendingTracks.take(5)
+
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                items(displayRecent) { track ->
+                    HorizontalShelfTrackCard(
                         track = track,
-                        isPlaying = isPlaying && currentTrack?.id == track.id,
+                        badgeText = if (recentHistory.isNotEmpty())
+                            tr(lang, "پخش اخیر", "RECENT")
+                        else
+                            tr(lang, "پیشنهادی", "FOR YOU"),
                         isCurrentTrack = currentTrack?.id == track.id,
-                        onTrackClick = { onTrackClick(track, trendingTracks) },
-                        onToggleFavorite = { onToggleFavorite(track) },
-                        onAddToPlaylistClick = { onAddToPlaylistClick(track) },
-                        trailingContent = {
-                            // Rank number badge (#1, #2, #3...)
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 6.dp)
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(if (index < 3) Color(0x33FFB800) else OledSurfaceHigh),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "${index + 1}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (index < 3) AccentGold else TextSecondary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                        isPlaying = isPlaying && currentTrack?.id == track.id,
+                        onTrackClick = { onTrackClick(track, displayRecent) },
+                        onArtistClick = onArtistClick
                     )
                 }
             }
@@ -383,12 +355,12 @@ fun HomeScreen(
 }
 
 @Composable
-private fun rememberGreeting(): String {
+private fun rememberGreeting(lang: AppLanguage): String {
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     return when (hour) {
-        in 5..11 -> "صبح بخیر ☀️"
-        in 12..16 -> "عصر بخیر 🌤️"
-        in 17..22 -> "غروب بخیر 🌆"
-        else -> "شب بخیر 🌙"
+        in 5..11 -> tr(lang, "صبح بخیر ☀️", "Good Morning ☀️")
+        in 12..16 -> tr(lang, "عصر بخیر 🌤️", "Good Afternoon 🌤️")
+        in 17..22 -> tr(lang, "غروب بخیر 🌆", "Good Evening 🌆")
+        else -> tr(lang, "شب بخیر 🌙", "Good Night 🌙")
     }
 }

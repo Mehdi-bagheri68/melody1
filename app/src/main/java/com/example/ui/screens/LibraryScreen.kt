@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -52,16 +51,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.data.model.Playlist
 import com.example.data.model.Track
+import com.example.ui.AppStrings.tr
+import com.example.ui.LocalAppLanguage
 import com.example.ui.components.TrackItemCard
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.AccentOrange
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.OledBackground
 import com.example.ui.theme.OledSurface
-import com.example.ui.theme.OledSurfaceHigh
 import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -75,14 +74,21 @@ fun LibraryScreen(
     currentTrack: Track?,
     isPlaying: Boolean,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onArtistClick: (String) -> Unit,
+    onStopTrackClick: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit,
     onCreatePlaylistClick: () -> Unit,
     onOpenPlaylist: (Playlist) -> Unit,
     onClearHistory: () -> Unit
 ) {
+    val lang = LocalAppLanguage.current
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("علاقه‌مندی‌ها", "پلی‌لیست‌ها", "تاریخچه گوش دادن")
+    val tabs = listOf(
+        tr(lang, "علاقه‌مندی‌ها", "Liked Songs"),
+        tr(lang, "پلی‌لیست‌ها", "Playlists"),
+        tr(lang, "تاریخچه گوش دادن", "Listening History")
+    )
 
     Column(
         modifier = Modifier
@@ -90,7 +96,6 @@ fun LibraryScreen(
             .background(OledBackground)
             .statusBarsPadding()
     ) {
-        // Top Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -99,7 +104,7 @@ fun LibraryScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "کتابخانه من",
+                text = tr(lang, "کتابخانه من", "My Music"),
                 style = MaterialTheme.typography.headlineMedium,
                 color = TextPrimary,
                 fontWeight = FontWeight.Bold
@@ -117,7 +122,7 @@ fun LibraryScreen(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("پلی‌لیست جدید", style = MaterialTheme.typography.labelMedium)
+                    Text(tr(lang, "پلی‌لیست جدید", "New Playlist"), style = MaterialTheme.typography.labelMedium)
                 }
             } else if (selectedTab == 2 && listeningHistory.isNotEmpty()) {
                 IconButton(
@@ -133,7 +138,6 @@ fun LibraryScreen(
             }
         }
 
-        // Tabs
         ScrollableTabRow(
             selectedTabIndex = selectedTab,
             containerColor = OledBackground,
@@ -162,13 +166,14 @@ fun LibraryScreen(
             }
         }
 
-        // Tab Content
         when (selectedTab) {
             0 -> FavoritesTabContent(
                 favorites = favorites,
                 currentTrack = currentTrack,
                 isPlaying = isPlaying,
                 onTrackClick = onTrackClick,
+                onArtistClick = onArtistClick,
+                onStopTrackClick = onStopTrackClick,
                 onToggleFavorite = onToggleFavorite,
                 onAddToPlaylistClick = onAddToPlaylistClick
             )
@@ -182,6 +187,8 @@ fun LibraryScreen(
                 currentTrack = currentTrack,
                 isPlaying = isPlaying,
                 onTrackClick = onTrackClick,
+                onArtistClick = onArtistClick,
+                onStopTrackClick = onStopTrackClick,
                 onToggleFavorite = onToggleFavorite,
                 onAddToPlaylistClick = onAddToPlaylistClick
             )
@@ -195,9 +202,12 @@ private fun FavoritesTabContent(
     currentTrack: Track?,
     isPlaying: Boolean,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onArtistClick: (String) -> Unit,
+    onStopTrackClick: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit
 ) {
+    val lang = LocalAppLanguage.current
     if (favorites.isEmpty()) {
         Box(
             modifier = Modifier
@@ -214,13 +224,17 @@ private fun FavoritesTabContent(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "هنوز آهنگی را مورد علاقه نکرده‌اید",
+                    text = tr(lang, "هنوز آهنگی را مورد علاقه نکرده‌اید", "No liked songs yet"),
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "برای دسترسی سریع، آیکون قلب را روی هر آهنگ لمس کنید",
+                    text = tr(
+                        lang,
+                        "برای دسترسی سریع، آیکون قلب را روی هر آهنگ لمس کنید",
+                        "Tap the heart icon on any track to save it here"
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -232,7 +246,6 @@ private fun FavoritesTabContent(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Action button to play all favorites
             item {
                 Row(
                     modifier = Modifier
@@ -242,7 +255,7 @@ private fun FavoritesTabContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "${favorites.size} آهنگ ذخیره شده",
+                        text = tr(lang, "${favorites.size} آهنگ ذخیره شده", "${favorites.size} saved tracks"),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
@@ -254,7 +267,7 @@ private fun FavoritesTabContent(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, tint = AccentGold)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("پخش همه", color = TextPrimary)
+                        Text(tr(lang, "پخش پشت سر هم همه", "Play All"), color = TextPrimary)
                     }
                 }
             }
@@ -266,7 +279,9 @@ private fun FavoritesTabContent(
                     isCurrentTrack = currentTrack?.id == track.id,
                     onTrackClick = { onTrackClick(track, favorites) },
                     onToggleFavorite = { onToggleFavorite(track) },
-                    onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                    onAddToPlaylistClick = { onAddToPlaylistClick(track) },
+                    onArtistClick = onArtistClick,
+                    onStopTrackClick = onStopTrackClick
                 )
             }
         }
@@ -279,6 +294,7 @@ private fun PlaylistsTabContent(
     onCreatePlaylistClick: () -> Unit,
     onOpenPlaylist: (Playlist) -> Unit
 ) {
+    val lang = LocalAppLanguage.current
     if (playlists.isEmpty()) {
         Box(
             modifier = Modifier
@@ -295,13 +311,17 @@ private fun PlaylistsTabContent(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "پلی‌لیستی ساخته نشده است",
+                    text = tr(lang, "پلی‌لیستی ساخته نشده است", "No playlists created yet"),
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "می‌توانید برای رانندگی، مهمانی یا ورزش پوشه‌های سفارشی بسازید",
+                    text = tr(
+                        lang,
+                        "می‌توانید برای رانندگی، مهمانی یا ورزش پوشه‌های سفارشی بسازید",
+                        "Create custom playlists for driving, workouts, or parties"
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -314,7 +334,7 @@ private fun PlaylistsTabContent(
                         contentColor = Color.Black
                     )
                 ) {
-                    Text("ساخت اولین پلی‌لیست")
+                    Text(tr(lang, "ساخت اولین پلی‌لیست", "Create First Playlist"))
                 }
             }
         }
@@ -373,7 +393,7 @@ private fun PlaylistsTabContent(
                                 )
                             }
                             Text(
-                                text = "${pl.trackCount} آهنگ",
+                                text = tr(lang, "${pl.trackCount} آهنگ", "${pl.trackCount} tracks"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextTertiary
                             )
@@ -391,9 +411,12 @@ private fun HistoryTabContent(
     currentTrack: Track?,
     isPlaying: Boolean,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onArtistClick: (String) -> Unit,
+    onStopTrackClick: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit
 ) {
+    val lang = LocalAppLanguage.current
     if (listeningHistory.isEmpty()) {
         Box(
             modifier = Modifier
@@ -410,13 +433,17 @@ private fun HistoryTabContent(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "تاریخچه‌ای ثبت نشده است",
+                    text = tr(lang, "تاریخچه‌ای ثبت نشده است", "No listening history yet"),
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "هر آهنگی که پخش کنید در این بخش ثبت خواهد شد",
+                    text = tr(
+                        lang,
+                        "هر آهنگی که پخش کنید در این بخش ثبت خواهد شد",
+                        "Tracks you play will automatically appear here"
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -435,7 +462,9 @@ private fun HistoryTabContent(
                     isCurrentTrack = currentTrack?.id == track.id,
                     onTrackClick = { onTrackClick(track, listeningHistory) },
                     onToggleFavorite = { onToggleFavorite(track) },
-                    onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                    onAddToPlaylistClick = { onAddToPlaylistClick(track) },
+                    onArtistClick = onArtistClick,
+                    onStopTrackClick = onStopTrackClick
                 )
             }
         }

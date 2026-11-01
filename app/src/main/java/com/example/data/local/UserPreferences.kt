@@ -2,6 +2,7 @@ package com.example.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.data.model.AppLanguage
 import com.example.data.model.AudioQuality
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +28,18 @@ class UserPreferences(context: Context) {
         )
     val audioQuality: StateFlow<AudioQuality> = _audioQuality.asStateFlow()
 
+    private val _appLanguage =
+        MutableStateFlow(
+            try {
+                AppLanguage.valueOf(
+                    prefs.getString(KEY_APP_LANGUAGE, AppLanguage.FA.name) ?: AppLanguage.FA.name
+                )
+            } catch (e: Exception) {
+                AppLanguage.FA
+            }
+        )
+    val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
+
     fun setOnboardingCompleted(completed: Boolean) {
         prefs.edit().putBoolean(KEY_ONBOARDING_COMPLETED, completed).apply()
         _onboardingCompleted.value = completed
@@ -42,9 +55,15 @@ class UserPreferences(context: Context) {
         _audioQuality.value = quality
     }
 
+    fun setAppLanguage(language: AppLanguage) {
+        prefs.edit().putString(KEY_APP_LANGUAGE, language.name).apply()
+        _appLanguage.value = language
+    }
+
     companion object {
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_COUNTRY_CODE = "selected_country_code"
         private const val KEY_AUDIO_QUALITY = "audio_quality"
+        private const val KEY_APP_LANGUAGE = "app_language"
     }
 }

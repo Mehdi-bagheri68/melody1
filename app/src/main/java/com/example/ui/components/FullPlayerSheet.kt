@@ -26,11 +26,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Repeat
@@ -38,6 +41,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -66,15 +70,16 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.AudioQuality
 import com.example.data.model.CountriesData
 import com.example.data.model.PlaybackMode
 import com.example.data.model.Track
-import com.example.ui.theme.AccentAmber
+import com.example.ui.AppStrings.tr
+import com.example.ui.LocalAppLanguage
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.AccentOrange
 import com.example.ui.theme.BorderHighlight
@@ -82,6 +87,7 @@ import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.GradientGoldEnd
 import com.example.ui.theme.GradientGoldStart
 import com.example.ui.theme.OledBackground
+import com.example.ui.theme.OledSurface
 import com.example.ui.theme.OledSurfaceHigh
 import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
@@ -100,15 +106,18 @@ fun FullPlayerSheet(
     audioQuality: AudioQuality,
     onDismiss: () -> Unit,
     onPlayPauseToggle: () -> Unit,
+    onStopAndClear: () -> Unit,
     onSkipNext: () -> Unit,
     onSkipPrevious: () -> Unit,
     onSeekTo: (Long) -> Unit,
-    onTogglePlaybackMode: () -> Unit,
+    onSelectPlaybackMode: (PlaybackMode) -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onArtistClick: (String) -> Unit,
     onCycleAudioQuality: () -> Unit
 ) {
     if (track == null) return
+    val lang = LocalAppLanguage.current
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -121,7 +130,6 @@ fun FullPlayerSheet(
 
     val displayRatio = if (isUserSeeking) seekPositionRatio else actualProgressRatio
 
-    // Vinyl rotation animation when music is actively playing
     val infiniteTransition = rememberInfiniteTransition(label = "vinyl")
     val rotationAngle by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -154,7 +162,7 @@ fun FullPlayerSheet(
                 )
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 20.dp)
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -165,27 +173,27 @@ fun FullPlayerSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 16.dp),
+                        .padding(top = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(44.dp)
                             .testTag("dismiss_player_btn")
                     ) {
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowDown,
                             contentDescription = "Collapse",
                             tint = TextPrimary,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(30.dp)
                         )
                     }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "درحال پخش",
+                            text = tr(lang, "درحال پخش", "Now Playing"),
                             style = MaterialTheme.typography.titleMedium,
                             color = AccentGold,
                             fontWeight = FontWeight.Bold
@@ -193,34 +201,47 @@ fun FullPlayerSheet(
                         val country = CountriesData.allCountries.find { it.code.equals(track.countryCode, ignoreCase = true) }
                         if (country != null) {
                             Text(
-                                text = "${country.flag} ${country.nameFa}",
+                                text = "${country.flag} ${country.getDisplayName(lang)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary
                             )
                         }
                     }
 
-                    IconButton(
-                        onClick = onAddToPlaylist,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("player_add_playlist_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlaylistAdd,
-                            contentDescription = "Add to playlist",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
+                    Row {
+                        IconButton(
+                            onClick = onAddToPlaylist,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .testTag("player_add_playlist_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlaylistAdd,
+                                contentDescription = "Add to playlist",
+                                tint = TextPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = onStopAndClear,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .testTag("player_stop_clear_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Stop,
+                                contentDescription = tr(lang, "توقف و حذف پخش", "Stop & Clear"),
+                                tint = AccentOrange,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
 
                 // Vinyl Disc Artwork Section
                 Box(
                     modifier = Modifier
-                        .size(260.dp)
+                        .size(220.dp)
                         .shadow(16.dp, CircleShape)
                         .clip(CircleShape)
                         .background(Color(0xFF0A0D14))
@@ -228,68 +249,133 @@ fun FullPlayerSheet(
                         .rotate(if (isPlaying) rotationAngle else 0f),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Vinyl Grooves
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         drawCircle(color = Color(0xFF141923), radius = size.minDimension / 2.1f)
                         drawCircle(color = Color(0xFF1B2230), radius = size.minDimension / 2.3f)
                         drawCircle(color = Color(0xFF0F141E), radius = size.minDimension / 2.7f)
                     }
 
-                    // Center Album Cover
                     AsyncImage(
                         model = track.highResArtworkUrl,
                         contentDescription = track.title,
                         modifier = Modifier
-                            .size(130.dp)
+                            .size(110.dp)
                             .clip(CircleShape)
                             .border(2.dp, AccentGold, CircleShape),
                         contentScale = ContentScale.Crop
                     )
 
-                    // Center spindle hole
                     Box(
                         modifier = Modifier
-                            .size(20.dp)
+                            .size(18.dp)
                             .clip(CircleShape)
                             .background(OledBackground)
                             .border(2.dp, AccentOrange, CircleShape)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Track Title and Artist Details
+                // Track Title and Clickable Artist Details
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = track.title,
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.headlineSmall,
                         color = TextPrimary,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Clickable Artist Pill to open Artist Discography
+                    Surface(
+                        color = OledSurfaceHigh,
+                        shape = RoundedCornerShape(20.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderHighlight),
+                        modifier = Modifier
+                            .clickable { onArtistClick(track.artist) }
+                            .testTag("player_artist_pill")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = tr(lang, "${track.artist} (مشاهده آرشیو خواننده)", "${track.artist} (View Artist Archive)"),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = track.artist,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = AccentGold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${track.album} • ${track.releaseYear}",
+                        text = tr(lang, "${track.album} • سال ${track.releaseYear}", "${track.album} • ${track.releaseYear}"),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextTertiary,
                         maxLines = 1
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // Repeat One / Repeat Group (All) / Shuffle Selector Bar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        Triple(PlaybackMode.REPEAT_ONE, tr(lang, "تکرار ۱ آهنگ", "Repeat 1"), Icons.Default.RepeatOne),
+                        Triple(PlaybackMode.REPEAT_ALL, tr(lang, "تکرار گروه/لیست", "Repeat Queue"), Icons.Default.Repeat),
+                        Triple(PlaybackMode.SHUFFLE, tr(lang, "پخش تصادفی", "Shuffle"), Icons.Default.Shuffle)
+                    ).forEach { (mode, label, icon) ->
+                        val isSelected = playbackMode == mode
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) AccentGold else BorderSubtle,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onSelectPlaybackMode(mode) }
+                                .testTag("mode_btn_${mode.name}"),
+                            color = if (isSelected) OledSurfaceHigh else OledSurface
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = label,
+                                    tint = if (isSelected) AccentGold else TextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSelected) AccentGold else TextSecondary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
 
                 // Interactive Progress Slider & Timestamps
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -332,31 +418,22 @@ fun FullPlayerSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
                 // Playback Controls Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Playback Mode / Shuffle / Repeat
+                    // Stop & Clear Playback button
                     IconButton(
-                        onClick = onTogglePlaybackMode,
+                        onClick = onStopAndClear,
                         modifier = Modifier.size(48.dp)
                     ) {
-                        val icon = when (playbackMode) {
-                            PlaybackMode.SHUFFLE -> Icons.Default.Shuffle
-                            PlaybackMode.REPEAT_ONE -> Icons.Default.RepeatOne
-                            PlaybackMode.REPEAT_ALL -> Icons.Default.Repeat
-                            PlaybackMode.NORMAL -> Icons.Default.Repeat
-                        }
-                        val tint = if (playbackMode != PlaybackMode.NORMAL) AccentGold else TextTertiary
                         Icon(
-                            imageVector = icon,
-                            contentDescription = "Playback Mode",
-                            tint = tint,
-                            modifier = Modifier.size(24.dp)
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "توقف کامل",
+                            tint = AccentOrange,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
 
@@ -378,7 +455,7 @@ fun FullPlayerSheet(
                     // Main Glowing Play / Pause Button
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(70.dp)
                             .shadow(12.dp, CircleShape)
                             .clip(CircleShape)
                             .background(
@@ -392,7 +469,7 @@ fun FullPlayerSheet(
                     ) {
                         if (isBuffering) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(36.dp),
+                                modifier = Modifier.size(34.dp),
                                 color = Color.Black,
                                 strokeWidth = 3.dp
                             )
@@ -401,7 +478,7 @@ fun FullPlayerSheet(
                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (isPlaying) "Pause" else "Play",
                                 tint = Color.Black,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(38.dp)
                             )
                         }
                     }
@@ -437,8 +514,6 @@ fun FullPlayerSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
                 // Bottom Audio Quality & Info Badge
                 Surface(
                     shape = RoundedCornerShape(20.dp),
@@ -446,7 +521,7 @@ fun FullPlayerSheet(
                     border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
                     modifier = Modifier
                         .clickable(onClick = onCycleAudioQuality)
-                        .padding(bottom = 20.dp)
+                        .padding(bottom = 14.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -460,7 +535,7 @@ fun FullPlayerSheet(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "${audioQuality.titleFa} (${audioQuality.bitrate})",
+                            text = "${audioQuality.getTitle(lang)} (${audioQuality.bitrate})",
                             style = MaterialTheme.typography.labelMedium,
                             color = TextPrimary
                         )

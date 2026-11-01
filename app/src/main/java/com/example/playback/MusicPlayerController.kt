@@ -2,14 +2,12 @@ package com.example.playback
 
 import android.content.Context
 import android.net.Uri
-import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.data.model.AudioQuality
@@ -36,13 +34,12 @@ class MusicPlayerController private constructor(private val context: Context) {
             .setUsage(C.USAGE_MEDIA)
             .build()
 
-        // Robust buffering control to handle variable networks
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000, // min buffer
-                50000, // max buffer
-                2500,  // buffer for playback
-                5000   // buffer for playback after rebuffer
+                15000,
+                50000,
+                2500,
+                5000
             )
             .build()
 
@@ -76,13 +73,13 @@ class MusicPlayerController private constructor(private val context: Context) {
     private val _currentIndex = MutableStateFlow(0)
     val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
 
-    private val _playbackMode = MutableStateFlow(PlaybackMode.NORMAL)
+    // Default to REPEAT_ALL so lists automatically advance and loop seamlessly
+    private val _playbackMode = MutableStateFlow(PlaybackMode.REPEAT_ALL)
     val playbackMode: StateFlow<PlaybackMode> = _playbackMode.asStateFlow()
 
     private val _audioQuality = MutableStateFlow(AudioQuality.HIGH)
     val audioQuality: StateFlow<AudioQuality> = _audioQuality.asStateFlow()
 
-    // Callback when a track begins playback (e.g. to save in listening history)
     var onTrackPlayedListener: ((Track) -> Unit)? = null
 
     private val playerListener = object : Player.Listener {
@@ -136,6 +133,7 @@ class MusicPlayerController private constructor(private val context: Context) {
 
         _currentTrack.value = track
         _durationMs.value = track.durationMs
+        _currentPositionMs.value = 0L
 
         val mediaMetadata = MediaMetadata.Builder()
             .setTitle(track.title)
@@ -166,6 +164,44 @@ class MusicPlayerController private constructor(private val context: Context) {
             } else {
                 exoPlayer.play()
             }
+        }
+    }
+
+    /**
+     * Completely stops playback, clears active track and hides player bar
+     */
+    fun stopAndClearPlayback() {
+        stopProgressTracker()
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
+        _isPlaying.value = false
+        _isBuffering.value = false
+        _currentPositionMs.value = 0L
+        _durationMs.value = 0L
+        _currentTrack.value = null
+    }
+
+    /**
+     * Removes a specific track from the current playback queue.
+     * If it is currently playing, either advances to next or stops if queue becomes empty.
+     */
+    fun removeTrackFromQueue(trackId: Long) {
+        val currentQ = _queue.value.toMutableList()
+        val removedIndex = currentQ.indexOfFirst { it.id == trackId }
+        if (removedIndex == -1) return
+
+        val wasCurrent = _currentTrack.value?.id == trackId
+        currentQ.removeAt(removedIndex)
+        _queue.value = currentQ
+
+        if (currentQ.isEmpty()) {
+            stopAndClearPlayback()
+        } else if (wasCurrent) {
+            val nextIdx = removedIndex.coerceAtMost(currentQ.size - 1)
+            _currentIndex.value = nextIdx
+            playTrack(currentQ[nextIdx], currentQ)
+        } else {
+            _currentIndex.value = currentQ.indexOfFirst { it.id == _currentTrack.value?.id }.coerceAtLeast(0)
         }
     }
 
@@ -202,7 +238,6 @@ class MusicPlayerController private constructor(private val context: Context) {
         val q = _queue.value
         if (q.isEmpty()) return
 
-        // If played more than 3 seconds, replay current song first
         if (exoPlayer.currentPosition > 3000) {
             seekTo(0)
             return
@@ -214,24 +249,49 @@ class MusicPlayerController private constructor(private val context: Context) {
     }
 
     private fun handleTrackEnded() {
+        val q = _queue.value
+        if (q.isEmpty()) return
+
         when (_playbackMode.value) {
             PlaybackMode.REPEAT_ONE -> {
                 seekTo(0)
                 exoPlayer.play()
             }
-            PlaybackMode.REPEAT_ALL, PlaybackMode.SHUFFLE, PlaybackMode.NORMAL -> {
-                skipNext()
+            PlaybackMode.REPEAT_ALL -> {
+                val nextIndex = (_currentIndex.value + 1) % q.size
+                _currentIndex.value = nextIndex
+                playTrack(q[nextIndex])
+            }
+            PlaybackMode.SHUFFLE -> {
+                val nextIndex = (q.indices).random()
+                _currentIndex.value = nextIndex
+                playTrack(q[nextIndex])
+            }
+            PlaybackMode.NORMAL -> {
+                if (_currentIndex.value + 1 < q.size) {
+                    val nextIndex = _currentIndex.value + 1
+                    _currentIndex.value = nextIndex
+                    playTrack(q[nextIndex])
+                } else {
+                    _isPlaying.value = false
+                    seekTo(0)
+                    exoPlayer.pause()
+                }
             }
         }
     }
 
     fun togglePlaybackMode() {
         _playbackMode.value = when (_playbackMode.value) {
-            PlaybackMode.NORMAL -> PlaybackMode.REPEAT_ALL
             PlaybackMode.REPEAT_ALL -> PlaybackMode.REPEAT_ONE
             PlaybackMode.REPEAT_ONE -> PlaybackMode.SHUFFLE
             PlaybackMode.SHUFFLE -> PlaybackMode.NORMAL
+            PlaybackMode.NORMAL -> PlaybackMode.REPEAT_ALL
         }
+    }
+
+    fun setPlaybackMode(mode: PlaybackMode) {
+        _playbackMode.value = mode
     }
 
     fun setAudioQuality(quality: AudioQuality) {

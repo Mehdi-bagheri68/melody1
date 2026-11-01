@@ -26,9 +26,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.HighQuality
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,11 +44,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.AppLanguage
 import com.example.data.model.AudioQuality
 import com.example.data.model.Country
+import com.example.ui.AppStrings.tr
+import com.example.ui.LocalAppLanguage
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.AccentOrange
-import com.example.ui.theme.BorderHighlight
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.OledBackground
 import com.example.ui.theme.OledSurface
@@ -62,10 +63,13 @@ import com.example.ui.theme.TextTertiary
 fun SettingsScreen(
     selectedCountry: Country,
     audioQuality: AudioQuality,
+    appLanguage: AppLanguage,
     onCountryChangeClick: () -> Unit,
-    onAudioQualityChanged: (AudioQuality) -> Unit
+    onAudioQualityChanged: (AudioQuality) -> Unit,
+    onLanguageChanged: (AppLanguage) -> Unit
 ) {
     val context = LocalContext.current
+    val lang = LocalAppLanguage.current
 
     LazyColumn(
         modifier = Modifier
@@ -77,23 +81,109 @@ fun SettingsScreen(
     ) {
         item {
             Text(
-                text = "تنظیمات و حریم خصوصی",
+                text = tr(lang, "تنظیمات و زبان برنامه", "Settings & Language"),
                 style = MaterialTheme.typography.headlineMedium,
                 color = TextPrimary,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "سفارشی‌سازی پخش، کیفیت صدا و مدیریت ترجیحات",
+                text = tr(
+                    lang,
+                    "تغییر زبان (فارسی راست‌به‌چپ / انگلیسی چپ‌به‌راست)، کشور و کیفیت پخش",
+                    "Customize language (Persian RTL / English LTR), region, and audio quality"
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
         }
 
+        // Section: App Language (Bilingual FA RTL / EN LTR)
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = tr(lang, "زبان و جهت نمایش برنامه (Language)", "App Language & Layout Direction"),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = AccentGold,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                AppLanguage.values().forEach { option ->
+                    val isSelected = option == appLanguage
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) AccentGold else BorderSubtle,
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .clickable { onLanguageChanged(option) }
+                            .testTag("lang_option_${option.code}"),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) OledSurfaceHigh else OledSurface
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = if (option == AppLanguage.FA) "🇮🇷 فارسی" else "🇬🇧 English",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (isSelected) AccentGold else TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = AccentGold,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (option == AppLanguage.FA) {
+                                    tr(lang, "راست به چپ (RTL)", "Right-to-Left (RTL)")
+                                } else {
+                                    tr(lang, "چپ به راست (LTR)", "Left-to-Right (LTR)")
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Section: Country Preference
         item {
             Text(
-                text = "کشور و منطقه موسیقی",
+                text = tr(lang, "کشور و منطقه موسیقی", "Music Country & Region"),
                 style = MaterialTheme.typography.titleMedium,
                 color = AccentGold,
                 fontWeight = FontWeight.Bold
@@ -119,13 +209,17 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = selectedCountry.nameFa,
+                            text = selectedCountry.getDisplayName(lang),
                             style = MaterialTheme.typography.titleMedium,
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "برای تغییر کشور و فید خانه لمس کنید",
+                            text = tr(
+                                lang,
+                                "برای تغییر کشور و فید خانه لمس کنید",
+                                "Tap to switch music country and home feed"
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -135,7 +229,7 @@ fun SettingsScreen(
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            text = "تغییر",
+                            text = tr(lang, "تغییر", "Change"),
                             color = AccentGold,
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
@@ -148,7 +242,7 @@ fun SettingsScreen(
         // Section: Audio Quality Selector
         item {
             Text(
-                text = "کیفیت پخش و مصرف دیتا",
+                text = tr(lang, "کیفیت پخش و مصرف دیتا", "Streaming Quality & Data Usage"),
                 style = MaterialTheme.typography.titleMedium,
                 color = AccentGold,
                 fontWeight = FontWeight.Bold
@@ -190,7 +284,7 @@ fun SettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = quality.titleFa,
+                                        text = quality.getTitle(lang),
                                         style = MaterialTheme.typography.titleSmall,
                                         color = if (isSelected) AccentGold else TextPrimary,
                                         fontWeight = FontWeight.Bold
@@ -203,7 +297,7 @@ fun SettingsScreen(
                                     )
                                 }
                                 Text(
-                                    text = quality.descriptionFa,
+                                    text = quality.getDescription(lang),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary
                                 )
@@ -224,7 +318,7 @@ fun SettingsScreen(
         // Section: External Integrations & Background Audio
         item {
             Text(
-                text = "یکپارچه‌سازی و پخش در پس‌زمینه",
+                text = tr(lang, "یکپارچه‌سازی و پخش در پس‌زمینه", "Background Playback & Integrations"),
                 style = MaterialTheme.typography.titleMedium,
                 color = AccentGold,
                 fontWeight = FontWeight.Bold
@@ -241,18 +335,30 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     FeatureStatusRow(
                         icon = Icons.Default.Lock,
-                        title = "کنترل روی صفحه قفل و نوار اعلان",
-                        description = "پشتیبانی کامل از استاندارد MediaSession در تمام نسخه‌ها"
+                        title = tr(lang, "کنترل روی صفحه قفل و نوار اعلان", "Lock Screen & Notification Controls"),
+                        description = tr(
+                            lang,
+                            "پشتیبانی کامل از استاندارد MediaSession در تمام نسخه‌ها",
+                            "Full MediaSession support across all Android versions"
+                        )
                     )
                     FeatureStatusRow(
                         icon = Icons.Default.Bluetooth,
-                        title = "پشتیبانی هدفون بلوتوث و هدست",
-                        description = "پاسخ فوری به کلیدهای پخش، مکث و جابجایی آهنگ"
+                        title = tr(lang, "پشتیبانی هدفون بلوتوث و هدست", "Bluetooth & Headset Controls"),
+                        description = tr(
+                            lang,
+                            "پاسخ فوری به کلیدهای پخش، مکث و جابجایی آهنگ",
+                            "Instant response to hardware play, pause, and skip keys"
+                        )
                     )
                     FeatureStatusRow(
                         icon = Icons.Default.Headphones,
-                        title = "حالت خودرو و رانندگی ایمن",
-                        description = "رابط کاربری بدون حواس‌پرتی با کلیدهای بزرگ ویژه اتومبیل"
+                        title = tr(lang, "حالت خودرو و رانندگی ایمن", "Safe Car & Driving Mode"),
+                        description = tr(
+                            lang,
+                            "دسترسی سریع از بالای صفحه اصلی با کلیدهای بزرگ ویژه اتومبیل",
+                            "Quick access from the top header with oversized car controls"
+                        )
                     )
                 }
             }
@@ -261,7 +367,7 @@ fun SettingsScreen(
         // Section: Privacy & Free Public API Transparency
         item {
             Text(
-                text = "شفافیت APIهای رایگان و حریم خصوصی",
+                text = tr(lang, "شفافیت APIهای رایگان و حریم خصوصی", "Privacy & Open Music APIs"),
                 style = MaterialTheme.typography.titleMedium,
                 color = AccentGold,
                 fontWeight = FontWeight.Bold
@@ -284,7 +390,7 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "احترام ۱۰۰٪ به حریم خصوصی کاربر",
+                            text = tr(lang, "احترام ۱۰۰٪ به حریم خصوصی کاربر", "100% User Privacy Protection"),
                             style = MaterialTheme.typography.titleSmall,
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold
@@ -292,7 +398,11 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "اپلیکیشن MeloGroove هیچ داده شخصی، شماره تماس یا ردگیری تبلیغاتی انجام نمی‌دهد. تمامی اطلاعات و متاداده‌های موسیقی به صورت آنی از APIهای عمومی و رایگان واکشی شده و علاقمندی‌ها صرفاً به صورت محلی در دستگاه شما نگهداری می‌شوند.",
+                        text = tr(
+                            lang,
+                            "اپلیکیشن MeloGroove هیچ داده شخصی، شماره تماس یا ردگیری تبلیغاتی انجام نمی‌دهد. تمامی آهنگ‌ها به صورت کامل (Full Track) استریم شده و علاقمندی‌ها در دستگاه شما نگهداری می‌شوند.",
+                            "MeloGroove collects zero personal data or ad tracking. All tracks stream in full length and your favorites and playlists are stored locally on your device."
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                         lineHeight = 20.sp
@@ -305,7 +415,12 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .clickable {
-                                Toast.makeText(context, "حافظه کش موقت با موفقیت پاکسازی شد", Toast.LENGTH_SHORT).show()
+                                val msg = if (lang == AppLanguage.FA) {
+                                    "حافظه کش موقت با موفقیت پاکسازی شد"
+                                } else {
+                                    "Temporary cache cleared successfully"
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             },
                         color = OledSurfaceHigh
                     ) {
@@ -317,7 +432,7 @@ fun SettingsScreen(
                             Icon(Icons.Default.CleaningServices, contentDescription = null, tint = AccentGold, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "پاکسازی حافظه کش موقت",
+                                text = tr(lang, "پاکسازی حافظه کش موقت", "Clear Temporary Cache"),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = TextPrimary
                             )
@@ -336,12 +451,16 @@ fun SettingsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "MeloGroove Online Music Player v1.0",
+                    text = "MeloGroove Online Music Player v1.1",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextTertiary
                 )
                 Text(
-                    text = "طراحی شده با Jetpack Compose و Material Design 3",
+                    text = tr(
+                        lang,
+                        "طراحی شده با Jetpack Compose و Material Design 3",
+                        "Built with Jetpack Compose & Material Design 3"
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextTertiary
                 )

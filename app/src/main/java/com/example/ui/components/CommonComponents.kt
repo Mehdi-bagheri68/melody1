@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -8,9 +7,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,9 +15,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,10 +36,11 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -68,31 +66,231 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
+import com.example.data.model.MoodCategory
 import com.example.data.model.Playlist
 import com.example.data.model.Track
+import com.example.ui.AppStrings.tr
+import com.example.ui.LocalAppLanguage
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.AccentOrange
 import com.example.ui.theme.BorderHighlight
 import com.example.ui.theme.BorderSubtle
-import com.example.ui.theme.OledBackground
 import com.example.ui.theme.OledSurface
 import com.example.ui.theme.OledSurfaceHigh
 import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
+
+@Composable
+fun ModernMoodCard(
+    mood: MoodCategory,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val lang = LocalAppLanguage.current
+    val brush = Brush.linearGradient(
+        colors = listOf(
+            Color(mood.colorStartHex),
+            Color(mood.colorEndHex)
+        )
+    )
+
+    Box(
+        modifier = modifier
+            .height(92.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(brush)
+            .border(
+                width = if (isSelected) 2.5.dp else 0.dp,
+                color = if (isSelected) Color.White else Color.Transparent,
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable(onClick = onClick)
+            .testTag("mood_${mood.id}")
+    ) {
+        AsyncImage(
+            model = mood.coverUrl,
+            contentDescription = mood.getPrimaryTitle(lang),
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(72.dp)
+                .align(Alignment.BottomEnd)
+                .offset(x = if (lang.isRtl) (-10).dp else 10.dp, y = 8.dp)
+                .rotate(if (lang.isRtl) -14f else 14f)
+                .shadow(8.dp, RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            if (mood.isNewRelease) {
+                Surface(
+                    color = Color(0x44000000),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = tr(lang, "جدید ۲۰۲۶", "NEW 2026"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.height(2.dp))
+            }
+
+            Column {
+                Text(
+                    text = mood.getPrimaryTitle(lang),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = mood.getSecondaryTitle(lang),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.8f),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Unified Horizontal Shelf Card (Used identically for New Releases, Trending, and Recently Played)
+ */
+@Composable
+fun HorizontalShelfTrackCard(
+    track: Track,
+    badgeText: String? = null,
+    isCurrentTrack: Boolean = false,
+    isPlaying: Boolean = false,
+    onTrackClick: () -> Unit,
+    onArtistClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val borderColor = if (isCurrentTrack) AccentGold else BorderSubtle
+
+    Card(
+        modifier = modifier
+            .width(156.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .clickable(onClick = onTrackClick)
+            .testTag("shelf_card_${track.id}"),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isCurrentTrack) OledSurfaceHigh else OledSurface
+        )
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(136.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(OledSurfaceVariant)
+            ) {
+                AsyncImage(
+                    model = track.artworkUrl,
+                    contentDescription = track.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+
+                if (badgeText != null) {
+                    Surface(
+                        color = Color(0xCC000000),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp)
+                    ) {
+                        Text(
+                            text = badgeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentGold,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(AccentGold),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isCurrentTrack && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.Black,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = track.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (isCurrentTrack) AccentGold else TextPrimary,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = track.artist,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    textDecoration = TextDecoration.Underline
+                ),
+                color = AccentGold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable { onArtistClick(track.artist) }
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = "${track.releaseYear} • ${track.durationFormatted}",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary,
+                maxLines = 1
+            )
+        }
+    }
+}
 
 @Composable
 fun TrackItemCard(
@@ -102,25 +300,18 @@ fun TrackItemCard(
     onTrackClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylistClick: () -> Unit,
+    onArtistClick: ((String) -> Unit)? = null,
+    onStopTrackClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     trailingContent: (@Composable () -> Unit)? = null
 ) {
+    val lang = LocalAppLanguage.current
     var showMenu by remember { mutableStateOf(false) }
 
     val cardBg = if (isCurrentTrack) {
-        Brush.horizontalGradient(
-            colors = listOf(
-                OledSurfaceVariant,
-                OledSurfaceHigh
-            )
-        )
+        Brush.horizontalGradient(colors = listOf(OledSurfaceVariant, OledSurfaceHigh))
     } else {
-        Brush.horizontalGradient(
-            colors = listOf(
-                OledSurface,
-                OledSurface
-            )
-        )
+        Brush.horizontalGradient(colors = listOf(OledSurface, OledSurface))
     }
 
     val borderColor = if (isCurrentTrack) AccentGold else BorderSubtle
@@ -144,7 +335,6 @@ fun TrackItemCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Album artwork with overlay play state
                 Box(
                     modifier = Modifier
                         .size(56.dp)
@@ -184,7 +374,6 @@ fun TrackItemCard(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Title, Artist, Genre & Country flag
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -198,27 +387,48 @@ fun TrackItemCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = track.artist,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
+
                     Row(
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(enabled = onArtistClick != null) {
+                                onArtistClick?.invoke(track.artist)
+                            }
+                            .padding(vertical = 2.dp, horizontal = 2.dp)
+                            .testTag("artist_link_${track.id}")
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = track.artist,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                textDecoration = if (onArtistClick != null) TextDecoration.Underline else TextDecoration.None
+                            ),
+                            color = AccentGold,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         val country = CountriesData.allCountries.find { it.code.equals(track.countryCode, ignoreCase = true) }
                         if (country != null) {
                             Text(
                                 text = country.flag,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 modifier = Modifier.padding(end = 4.dp)
                             )
                         }
                         Text(
-                            text = "${track.genre} • ${track.durationFormatted}",
+                            text = "${track.genre} • ${track.releaseYear} • ${track.durationFormatted}",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextTertiary,
                             maxLines = 1
@@ -229,11 +439,26 @@ fun TrackItemCard(
                 if (trailingContent != null) {
                     trailingContent()
                 } else {
-                    // Favorite button
+                    if (isCurrentTrack && onStopTrackClick != null) {
+                        IconButton(
+                            onClick = onStopTrackClick,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("stop_track_btn_${track.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Stop,
+                                contentDescription = tr(lang, "توقف پخش", "Stop Playback"),
+                                tint = AccentOrange,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
                     IconButton(
                         onClick = onToggleFavorite,
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(40.dp)
                             .testTag("fav_btn_${track.id}")
                     ) {
                         Icon(
@@ -244,12 +469,11 @@ fun TrackItemCard(
                         )
                     }
 
-                    // 3-dots popup menu
                     Box {
                         IconButton(
                             onClick = { showMenu = true },
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(40.dp)
                                 .testTag("menu_btn_${track.id}")
                         ) {
                             Icon(
@@ -265,8 +489,25 @@ fun TrackItemCard(
                             onDismissRequest = { showMenu = false },
                             modifier = Modifier.background(OledSurfaceHigh)
                         ) {
+                            if (onArtistClick != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            tr(lang, "مشاهده آهنگ‌های ${track.artist}", "View songs by ${track.artist}"),
+                                            color = AccentGold
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Person, contentDescription = null, tint = AccentGold)
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        onArtistClick(track.artist)
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
-                                text = { Text("افزودن به پلی‌لیست", color = TextPrimary) },
+                                text = { Text(tr(lang, "افزودن به پلی‌لیست", "Add to Playlist"), color = TextPrimary) },
                                 leadingIcon = {
                                     Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = AccentGold)
                                 },
@@ -278,7 +519,10 @@ fun TrackItemCard(
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        if (track.isFavorite) "حذف از علاقه‌مندی‌ها" else "افزودن به علاقه‌مندی‌ها",
+                                        if (track.isFavorite)
+                                            tr(lang, "حذف از علاقه‌مندی‌ها", "Remove from Favorites")
+                                        else
+                                            tr(lang, "افزودن به علاقه‌مندی‌ها", "Add to Favorites"),
                                         color = TextPrimary
                                     )
                                 },
@@ -294,6 +538,18 @@ fun TrackItemCard(
                                     onToggleFavorite()
                                 }
                             )
+                            if (onStopTrackClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text(tr(lang, "توقف و حذف پخش", "Stop & Clear Playback"), color = AccentOrange) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Delete, contentDescription = null, tint = AccentOrange)
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        onStopTrackClick()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -370,6 +626,8 @@ fun MiniPlayer(
     durationMs: Long,
     onPlayPauseToggle: () -> Unit,
     onSkipNext: () -> Unit,
+    onStopAndDismiss: () -> Unit,
+    onArtistClick: (String) -> Unit,
     onExpandClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -391,7 +649,6 @@ fun MiniPlayer(
         shadowElevation = 8.dp
     ) {
         Column {
-            // Track playback progress strip
             LinearProgressIndicator(
                 progress = { progress },
                 modifier = Modifier
@@ -404,10 +661,9 @@ fun MiniPlayer(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Artwork
                 Box(
                     modifier = Modifier
                         .size(44.dp)
@@ -425,12 +681,9 @@ fun MiniPlayer(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-                // Track details
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = currentTrack.title,
                         style = MaterialTheme.typography.titleSmall,
@@ -440,14 +693,18 @@ fun MiniPlayer(
                     )
                     Text(
                         text = currentTrack.artist,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            textDecoration = TextDecoration.Underline
+                        ),
+                        color = AccentGold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable {
+                            onArtistClick(currentTrack.artist)
+                        }
                     )
                 }
 
-                // Buffering indicator or Play/Pause
                 if (isBuffering) {
                     CircularProgressIndicator(
                         modifier = Modifier
@@ -460,14 +717,14 @@ fun MiniPlayer(
                     IconButton(
                         onClick = onPlayPauseToggle,
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(40.dp)
                             .testTag("mini_player_play_pause")
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (isPlaying) "Pause" else "Play",
                             tint = AccentGold,
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(26.dp)
                         )
                     }
                 }
@@ -475,14 +732,28 @@ fun MiniPlayer(
                 IconButton(
                     onClick = onSkipNext,
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(38.dp)
                         .testTag("mini_player_next")
                 ) {
                     Icon(
                         imageVector = Icons.Default.SkipNext,
                         contentDescription = "Next",
                         tint = TextPrimary,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onStopAndDismiss,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .testTag("mini_player_stop_close")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Stop",
+                        tint = AccentOrange,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -550,12 +821,13 @@ fun CountryPickerDialog(
     onSelectCountry: (Country) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val lang = LocalAppLanguage.current
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = OledSurfaceVariant,
         title = {
             Text(
-                text = "انتخاب کشور موسیقی",
+                text = tr(lang, "انتخاب کشور موسیقی", "Select Music Country"),
                 style = MaterialTheme.typography.titleLarge,
                 color = TextPrimary,
                 fontWeight = FontWeight.Bold
@@ -596,7 +868,7 @@ fun CountryPickerDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = country.nameFa,
+                                        text = country.getDisplayName(lang),
                                         style = MaterialTheme.typography.titleMedium,
                                         color = if (isSelected) AccentGold else TextPrimary,
                                         fontWeight = FontWeight.Bold
@@ -610,7 +882,7 @@ fun CountryPickerDialog(
                                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
                                             Text(
-                                                text = "پیشنهاد اصلی",
+                                                text = tr(lang, "پیشنهاد اصلی", "Featured"),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = AccentGold
                                             )
@@ -618,7 +890,7 @@ fun CountryPickerDialog(
                                     }
                                 }
                                 Text(
-                                    text = country.nameEn,
+                                    text = if (lang.isRtl) country.nameEn else country.nameFa,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary
                                 )
@@ -637,7 +909,7 @@ fun CountryPickerDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("بستن", color = AccentGold)
+                Text(tr(lang, "بستن", "Close"), color = AccentGold)
             }
         }
     )
@@ -648,6 +920,7 @@ fun CreatePlaylistDialog(
     onDismiss: () -> Unit,
     onCreate: (name: String, description: String) -> Unit
 ) {
+    val lang = LocalAppLanguage.current
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
 
@@ -655,14 +928,18 @@ fun CreatePlaylistDialog(
         onDismissRequest = onDismiss,
         containerColor = OledSurfaceVariant,
         title = {
-            Text("ساخت پلی‌لیست جدید", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+            Text(
+                tr(lang, "ساخت پلی‌لیست جدید", "Create New Playlist"),
+                style = MaterialTheme.typography.titleLarge,
+                color = TextPrimary
+            )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("نام پلی‌لیست (مثلاً «پلی‌لیست شاد»)") },
+                    label = { Text(tr(lang, "نام پلی‌لیست (مثلاً «پلی‌لیست شاد»)", "Playlist Name (e.g. Road Trip)")) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGold,
@@ -679,7 +956,7 @@ fun CreatePlaylistDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("توضیحات اختیاری (مثلاً «مخصوص رانندگی»)") },
+                    label = { Text(tr(lang, "توضیحات اختیاری", "Optional Description")) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGold,
                         unfocusedBorderColor = BorderSubtle,
@@ -702,12 +979,12 @@ fun CreatePlaylistDialog(
                 ),
                 modifier = Modifier.testTag("save_playlist_btn")
             ) {
-                Text("ایجاد پلی‌لیست")
+                Text(tr(lang, "ایجاد پلی‌لیست", "Create"))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("انصراف", color = TextSecondary)
+                Text(tr(lang, "انصراف", "Cancel"), color = TextSecondary)
             }
         }
     )
@@ -721,11 +998,16 @@ fun AddToPlaylistDialog(
     onCreateNewPlaylist: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val lang = LocalAppLanguage.current
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = OledSurfaceVariant,
         title = {
-            Text("افزودن به پلی‌لیست", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+            Text(
+                tr(lang, "افزودن به پلی‌لیست", "Add to Playlist"),
+                style = MaterialTheme.typography.titleLarge,
+                color = TextPrimary
+            )
         },
         text = {
             Column(
@@ -733,7 +1015,7 @@ fun AddToPlaylistDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "آهنگ: ${track.title} - ${track.artist}",
+                    text = "${track.title} - ${track.artist}",
                     style = MaterialTheme.typography.bodySmall,
                     color = AccentGold,
                     maxLines = 1,
@@ -749,12 +1031,12 @@ fun AddToPlaylistDialog(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("ساخت پلی‌لیست جدید", color = TextPrimary)
+                    Text(tr(lang, "ساخت پلی‌لیست جدید", "New Playlist"), color = TextPrimary)
                 }
 
                 if (playlists.isEmpty()) {
                     Text(
-                        text = "هنوز پلی‌لیستی نساخته‌اید.",
+                        text = tr(lang, "هنوز پلی‌لیستی نساخته‌اید.", "No playlists created yet."),
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary,
                         modifier = Modifier.padding(vertical = 12.dp)
@@ -787,7 +1069,7 @@ fun AddToPlaylistDialog(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(text = pl.name, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
                                         Text(
-                                            text = "${pl.trackCount} آهنگ",
+                                            text = tr(lang, "${pl.trackCount} آهنگ", "${pl.trackCount} tracks"),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = TextSecondary
                                         )
@@ -801,7 +1083,7 @@ fun AddToPlaylistDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("بستن", color = AccentGold)
+                Text(tr(lang, "بستن", "Close"), color = AccentGold)
             }
         }
     )
