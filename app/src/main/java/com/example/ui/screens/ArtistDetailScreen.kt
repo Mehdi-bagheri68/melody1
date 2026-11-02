@@ -79,7 +79,7 @@ fun ArtistDetailScreen(
     BackHandler { onBack() }
 
     val heroImage = tracks.firstOrNull()?.highResArtworkUrl
-        ?: "https://picsum.photos/seed/${artistName.hashCode()}/600/600"
+        ?: "file:///android_asset/covers/cover_1013.jpg"
 
     LazyColumn(
         modifier = Modifier

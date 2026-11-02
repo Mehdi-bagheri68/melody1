@@ -143,11 +143,12 @@ fun DrivingModeScreen(
                             .border(3.dp, BorderHighlight, RoundedCornerShape(24.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        AsyncImage(
-                            model = currentTrack.highResArtworkUrl,
-                            contentDescription = currentTrack.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                        com.example.ui.components.TrackArtwork(
+                            imageUrl = currentTrack.highResArtworkUrl,
+                            seedId = currentTrack.id,
+                            title = currentTrack.title,
+                            showTextOverlay = false,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
 

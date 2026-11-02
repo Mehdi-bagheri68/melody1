@@ -6,18 +6,23 @@ object CountriesData {
         nameFa = "ایران",
         nameEn = "Iran",
         flag = "🇮🇷",
-        defaultSearchTerm = "Homayoun Shajarian",
+        defaultSearchTerm = "محسن چاوشی",
         topArtists = listOf(
             "محسن چاوشی",
-            "محسن یگانه",
-            "محمدرضا شجریان",
             "همایون شجریان",
-            "شادمهر عقیلی",
-            "هایده",
-            "ابی",
-            "گوگوش",
+            "محمدرضا شجریان",
+            "محسن یگانه",
             "علیرضا قربانی",
-            "سیروان خسروی"
+            "سیروان خسروی",
+            "بهنام بانی",
+            "عرفان طهماسبی",
+            "رضا بهرام",
+            "گرشا رضایی",
+            "حامیم",
+            "مجید رضوی",
+            "فریدون آسرایی",
+            "احسان خواجه امیری",
+            "علی لهراسبی"
         )
     )
 
@@ -126,7 +131,7 @@ object CountriesData {
         return allCountries.find { it.code.equals(code, ignoreCase = true) } ?: iran
     }
 
-    // Modern Radio Javan / Spotify inspired vibrant mood & explore tiles (Unblocked URLs + Procedural Art)
+    // Modern Radio Javan / Spotify inspired vibrant mood & explore tiles with real bundled photographic covers
     val moodCategories: List<MoodCategory> = listOf(
         MoodCategory(
             id = "new_releases",
@@ -135,7 +140,7 @@ object CountriesData {
             query = "new_releases",
             colorStartHex = 0xFF7CB342,
             colorEndHex = 0xFF33691E,
-            coverUrl = "https://picsum.photos/seed/melo_new2026/400/400",
+            coverUrl = "file:///android_asset/covers/cover_1017.jpg",
             isNewRelease = true
         ),
         MoodCategory(
@@ -145,7 +150,7 @@ object CountriesData {
             query = "pop",
             colorStartHex = 0xFFE53935,
             colorEndHex = 0xFF8E0000,
-            coverUrl = "https://picsum.photos/seed/melo_pop/400/400"
+            coverUrl = "file:///android_asset/covers/cover_1016.jpg"
         ),
         MoodCategory(
             id = "party",
@@ -154,7 +159,7 @@ object CountriesData {
             query = "dance pop party",
             colorStartHex = 0xFFD81B60,
             colorEndHex = 0xFF6A0080,
-            coverUrl = "https://picsum.photos/seed/melo_party/400/400"
+            coverUrl = "file:///android_asset/covers/cover_1024.jpg"
         ),
         MoodCategory(
             id = "driving",
@@ -163,7 +168,7 @@ object CountriesData {
             query = "road trip drive",
             colorStartHex = 0xFFFB8C00,
             colorEndHex = 0xFFBF360C,
-            coverUrl = "https://picsum.photos/seed/melo_drive/400/400"
+            coverUrl = "file:///android_asset/covers/cover_1013.jpg"
         ),
         MoodCategory(
             id = "traditional",
@@ -172,7 +177,7 @@ object CountriesData {
             query = "traditional",
             colorStartHex = 0xFF8E24AA,
             colorEndHex = 0xFF38006B,
-            coverUrl = "https://picsum.photos/seed/melo_trad/400/400"
+            coverUrl = "file:///android_asset/covers/cover_1015.jpg"
         ),
         MoodCategory(
             id = "relax",
@@ -181,7 +186,7 @@ object CountriesData {
             query = "ambient piano calm",
             colorStartHex = 0xFFF4511E,
             colorEndHex = 0xFF870000,
-            coverUrl = "https://picsum.photos/seed/melo_chill/400/400"
+            coverUrl = "file:///android_asset/covers/cover_1011.jpg"
         ),
         MoodCategory(
             id = "workout",
@@ -190,16 +195,16 @@ object CountriesData {
             query = "workout energy beats",
             colorStartHex = 0xFF039BE5,
             colorEndHex = 0xFF004BA0,
-            coverUrl = "https://picsum.photos/seed/melo_workout/400/400"
+            coverUrl = "file:///android_asset/covers/cover_1019.jpg"
         ),
         MoodCategory(
             id = "focus",
-            titleFa = "تمرکز و بیکلام",
-            titleEn = "Instrumental",
-            query = "instrumental focus study",
+            titleFa = "عاشقانه و احساسی",
+            titleEn = "Romantic & Chill",
+            query = "romantic focus study",
             colorStartHex = 0xFF00897B,
             colorEndHex = 0xFF003D33,
-            coverUrl = "https://picsum.photos/seed/melo_focus/400/400"
+            coverUrl = "file:///android_asset/covers/cover_1005.jpg"
         )
     )
 }

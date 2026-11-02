@@ -12,7 +12,7 @@ import androidx.room.RoomDatabase
         PlaylistEntity::class,
         PlaylistTrackCrossRefEntity::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class MeloGrooveDatabase : RoomDatabase() {
