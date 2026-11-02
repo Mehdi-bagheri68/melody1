@@ -703,9 +703,12 @@ fun MiniPlayer(
     onStopAndDismiss: () -> Unit,
     onArtistClick: (String) -> Unit,
     onExpandClick: () -> Unit,
+    isRetrying: Boolean = false,
+    retryCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     if (currentTrack == null) return
+    val lang = LocalAppLanguage.current
 
     val progress = if (durationMs > 0) {
         (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
@@ -766,18 +769,32 @@ fun MiniPlayer(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = currentTrack.artist,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            textDecoration = TextDecoration.Underline
-                        ),
-                        color = AccentGold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable {
-                            onArtistClick(currentTrack.artist)
-                        }
-                    )
+                    if (isRetrying) {
+                        Text(
+                            text = tr(
+                                lang,
+                                "تلاش مجدد خودکار اتصال (${retryCount})...",
+                                "Auto-retrying stream (${retryCount})..."
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentOrange,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else {
+                        Text(
+                            text = currentTrack.artist,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                textDecoration = TextDecoration.Underline
+                            ),
+                            color = AccentGold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable {
+                                onArtistClick(currentTrack.artist)
+                            }
+                        )
+                    }
                 }
 
                 if (isBuffering) {

@@ -175,15 +175,23 @@ fun HomeScreen(
             }
         }
 
-        // 1. Modern 2-Column Explore & Moods Grid
+        // 1. Modern 2-Column Explore & Moods Grid (Dynamic per Selected Country)
         item {
             Column(modifier = Modifier.padding(top = 4.dp)) {
                 SectionHeader(
-                    title = tr(lang, "کشف و مودها", "Explore & Moods"),
-                    subtitle = tr(lang, "بروزترین‌ها و پلی‌لیست‌های موضوعی", "New releases & curated mood playlists")
+                    title = tr(
+                        lang,
+                        "کشف و دسته‌بندی‌های ${selectedCountry.nameFa} ${selectedCountry.flag}",
+                        "Explore & Moods in ${selectedCountry.nameEn} ${selectedCountry.flag}"
+                    ),
+                    subtitle = tr(
+                        lang,
+                        "بروزترین‌ها و سبک‌های موسیقی اختصاصی ${selectedCountry.nameFa}",
+                        "New releases & curated genres for ${selectedCountry.nameEn}"
+                    )
                 )
 
-                val moods = CountriesData.moodCategories
+                val moods = CountriesData.getMoodCategoriesForCountry(selectedCountry)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -219,8 +227,8 @@ fun HomeScreen(
                 SectionHeader(
                     title = tr(
                         lang,
-                        "لیست ${activeMood.titleFa}",
-                        "${activeMood.titleEn} Playlist"
+                        "لیست ${activeMood.titleFa} (${selectedCountry.nameFa})",
+                        "${activeMood.titleEn} (${selectedCountry.nameEn})"
                     ),
                     subtitle = tr(
                         lang,
@@ -264,7 +272,11 @@ fun HomeScreen(
             item {
                 Spacer(modifier = Modifier.height(22.dp))
                 SectionHeader(
-                    title = tr(lang, "بروزترین انتشارها", "Just Released"),
+                    title = tr(
+                        lang,
+                        "بروزترین انتشارهای ${selectedCountry.nameFa} ${selectedCountry.flag}",
+                        "Just Released in ${selectedCountry.nameEn} ${selectedCountry.flag}"
+                    ),
                     subtitle = tr(
                         lang,
                         "جدیدترین آهنگ‌های منتشر شده (${newReleaseTracks.firstOrNull()?.releaseYear ?: "2026"})",

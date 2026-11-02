@@ -81,6 +81,14 @@ class MainActivity : ComponentActivity() {
         window.decorView.layoutDirection =
             if (initialRtl) android.view.View.LAYOUT_DIRECTION_RTL else android.view.View.LAYOUT_DIRECTION_LTR
 
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
+        }
+
         setContent {
             val appLanguage by viewModel.appLanguage.collectAsState()
             val layoutDirection = if (appLanguage.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
@@ -142,6 +150,8 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val isBuffering by viewModel.isBuffering.collectAsState()
+    val isRetrying by viewModel.isRetrying.collectAsState()
+    val retryCount by viewModel.retryCount.collectAsState()
     val currentPositionMs by viewModel.currentPositionMs.collectAsState()
     val durationMs by viewModel.durationMs.collectAsState()
     val playbackMode by viewModel.playbackMode.collectAsState()
@@ -196,7 +206,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                     onSkipNext = { viewModel.skipNext() },
                                     onStopAndDismiss = { viewModel.stopAndClearPlayback() },
                                     onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
-                                    onExpandClick = { viewModel.setFullPlayerExpanded(true) }
+                                    onExpandClick = { viewModel.setFullPlayerExpanded(true) },
+                                    isRetrying = isRetrying,
+                                    retryCount = retryCount
                                 )
                             }
 

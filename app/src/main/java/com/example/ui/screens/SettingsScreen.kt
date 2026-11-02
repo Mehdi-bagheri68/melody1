@@ -442,6 +442,80 @@ fun SettingsScreen(
             }
         }
 
+        // Section: Complete Version History Documentation (v1.0.0 -> v1.4.0)
+        item {
+            Text(
+                text = tr(lang, "مستندات تاریخچه نسخه‌ها (VERSION_HISTORY.md)", "Version History & Changelog (v1.0.0 – v1.4.0)"),
+                style = MaterialTheme.typography.titleMedium,
+                color = AccentGold,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = OledSurface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    listOf(
+                        Triple(
+                            "v1.4.0 (Build 4) — نسخه فعلی",
+                            "• تفکیک کامل آهنگ‌ها و دسته‌بندی‌ها (Moods) بر اساس کشور انتخابی (ایران، ترکیه، آمریکا، بریتانیا، اسپانیا، فرانسه، آلمان)\n• رفع کامل قطع شدن پخش پس از ۱ دقیقه در پس‌زمینه و قفل صفحه با Foreground MediaSessionService و قفل سخت‌افزاری WakeLock / WifiLock\n• فعال‌سازی کامل دکمه‌های جلو/عقب بردن (Seek)، آهنگ بعدی و قبلی در نوار اعلان (Notification) و صفحه قفل (Lock Screen)\n• سیستم تلاش مجدد پیوسته خودکار (Continuous Auto-Retry) در زمان اختلال اینترنت و ادامه خودکار پخش از همان ثانیه قبلی\n• ضمیمه شدن فایل مستندات کامل تاریخچه نسخه‌ها (VERSION_HISTORY.md و CHANGELOG.md) در مسیر فایل‌های پروژه",
+                            "Country-specific catalogs & categories, uninterrupted lock-screen/background playback, full Notification & Lock Screen Seek/Next/Prev controls, continuous network auto-retry with exact position resume, and full version history documentation."
+                        ),
+                        Triple(
+                            "v1.3.0 (Build 3)",
+                            "• حذف موتور صدای آزمایشی و اتصال مستقیم ExoPlayer به سرورهای بدون فیلتر ایران (musics-fa و rozmusic) برای پخش کامل آهنگ‌های اصلی خوانندگان\n• تعبیه کاورهای اصلی آهنگ‌ها در داخل فایل نصبی (assets/covers) و کش ۱۰۰ مگابایتی برای نمایش تضمینی عکس آهنگ‌ها روی گوشی بدون نیاز به فیلترشکن",
+                            "Connected ExoPlayer directly to unfiltered full-length MP3 servers and bundled real photographic album covers locally for guaranteed No-VPN display."
+                        ),
+                        Triple(
+                            "v1.2.0 (Build 2)",
+                            "• ورود فوری به برنامه تنها با یک لمس روی کشور در صفحه اول (حذف دکمه اضافی شروع)\n• راست‌چین شدن (RTL) آنی در فریم صفر بدون پرش چپ به راست\n• افزودن شماره نسخه در هدر و تنظیمات برنامه",
+                            "Single-tap country onboarding, zero-frame RTL layout initialization, and version badge integration."
+                        ),
+                        Triple(
+                            "v1.1.0 (Build 1.1)",
+                            "• دوزبانه شدن کامل برنامه (فارسی راست‌به‌چپ و انگلیسی چپ‌به‌راست)\n• بازطراحی مدرن کارت‌های کشف و مودها به سبک رادیو جوان و اسپاتیفای + افزودن بخش «بروزترین‌ها» (۲۰۲۶ و ۲۰۲۵)\n• نمایش یکپارچه افقی (Carousel) برای بروزترین انتشارها، ترندها و اخیر شنیده‌ها\n• افزودن صفحه اختصاصی آرشیو کامل خواننده با مرتب‌سازی بر اساس ترند یا سال تولید، پخش خودکار لیست، تکرار یک آهنگ/گروه و دکمه توقف و حذف پخش",
+                            "Bilingual FA/EN RTL/LTR support, modern 2-column Explore & Moods cards, horizontal carousels for New Releases/Trending/Recent, Artist Discography screen, and Stop/Repeat modes."
+                        ),
+                        Triple(
+                            "v1.0.0 (Build 1 — نسخه اولیه)",
+                            "• ساخت اولیه اپلیکیشن موزیک پلیر آنلاین MeloGroove با معماری MVVM، Jetpack Compose، پایگاه داده محلی Room برای علاقه‌مندی‌ها، پلی‌لیست‌ها و تاریخچه پخش، حالت رانندگی ایمن و انتخاب کشور",
+                            "Initial release of MeloGroove with Clean MVVM architecture, Jetpack Compose OLED UI, Room database for Favorites/Playlists/History, Driving Mode, and Country Selection."
+                        )
+                    ).forEach { (ver, descFa, descEn) ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(OledSurfaceHigh)
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = ver,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = tr(lang, descFa, descEn),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                lineHeight = 19.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // App Footer
         item {
             Column(

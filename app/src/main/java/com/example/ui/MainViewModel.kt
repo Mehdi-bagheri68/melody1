@@ -51,6 +51,11 @@ class MainViewModel : ViewModel() {
     private val _selectedCountry = MutableStateFlow(initialCountry)
     val selectedCountry: StateFlow<Country> = _selectedCountry.asStateFlow()
 
+    private val _moodCategories = MutableStateFlow(
+        CountriesData.getMoodCategoriesForCountry(initialCountry)
+    )
+    val moodCategories: StateFlow<List<MoodCategory>> = _moodCategories.asStateFlow()
+
     // Synchronously initialized on frame 0 so there is zero empty state or LTR/RTL layout jump!
     private val _trendingTracks = MutableStateFlow<List<Track>>(
         repository.getInitialTrendingSync(initialCountry)
@@ -125,6 +130,8 @@ class MainViewModel : ViewModel() {
     val currentTrack: StateFlow<Track?> = playerController.currentTrack
     val isPlaying: StateFlow<Boolean> = playerController.isPlaying
     val isBuffering: StateFlow<Boolean> = playerController.isBuffering
+    val isRetrying: StateFlow<Boolean> = playerController.isRetrying
+    val retryCount: StateFlow<Int> = playerController.retryCount
     val currentPositionMs: StateFlow<Long> = playerController.currentPositionMs
     val durationMs: StateFlow<Long> = playerController.durationMs
     val playbackMode: StateFlow<PlaybackMode> = playerController.playbackMode
@@ -190,9 +197,12 @@ class MainViewModel : ViewModel() {
         userPreferences.setSelectedCountryCode(country.code)
         userPreferences.setOnboardingCompleted(true)
         _selectedCountry.value = country
+        _moodCategories.value = CountriesData.getMoodCategoriesForCountry(country)
         // Populate synchronously before switching screen so HomeScreen renders in RTL with full data on frame 0
         _trendingTracks.value = repository.getInitialTrendingSync(country)
         _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
+        _activeMood.value = null
+        _moodTracks.value = emptyList()
         _currentScreen.value = Screen.Home
         loadTrendingForCountry(country)
     }
@@ -200,9 +210,28 @@ class MainViewModel : ViewModel() {
     fun selectCountry(country: Country) {
         userPreferences.setSelectedCountryCode(country.code)
         _selectedCountry.value = country
+        val newCountryMoods = CountriesData.getMoodCategoriesForCountry(country)
+        _moodCategories.value = newCountryMoods
         _trendingTracks.value = repository.getInitialTrendingSync(country)
         _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
         _isCountryPickerVisible.value = false
+
+        // If a mood category was open, update it to the new country's corresponding category & reload its tracks
+        val currentMoodId = _activeMood.value?.id
+        if (currentMoodId != null) {
+            val mappedMood = newCountryMoods.find { it.id == currentMoodId }
+            _activeMood.value = mappedMood
+            if (mappedMood != null) {
+                viewModelScope.launch {
+                    _isLoadingMood.value = true
+                    _moodTracks.value = repository.getTracksForMood(mappedMood.query, country.code)
+                    _isLoadingMood.value = false
+                }
+            } else {
+                _moodTracks.value = emptyList()
+            }
+        }
+
         loadTrendingForCountry(country)
     }
 
@@ -233,7 +262,7 @@ class MainViewModel : ViewModel() {
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query
         searchJob?.cancel()
-        if (query.isBlank() && _searchGenreFilter.value == null && _searchYearFilter.value == null) {
+        if (query.isBlank() && _searchGenreFilter.value == null && _searchYearFilter.value == null && _searchCountryFilter.value == null) {
             _searchResults.value = emptyList()
             _isSearching.value = false
             return
@@ -257,8 +286,10 @@ class MainViewModel : ViewModel() {
 
     fun setSearchCountryFilter(code: String?) {
         _searchCountryFilter.value = code
-        if (_searchQuery.value.isNotBlank() || _searchGenreFilter.value != null || _searchYearFilter.value != null) {
+        if (_searchQuery.value.isNotBlank() || _searchGenreFilter.value != null || _searchYearFilter.value != null || code != null) {
             viewModelScope.launch { executeSearch(_searchQuery.value) }
+        } else {
+            _searchResults.value = emptyList()
         }
     }
 

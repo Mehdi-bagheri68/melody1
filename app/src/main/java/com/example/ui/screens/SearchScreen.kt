@@ -251,10 +251,14 @@ fun SearchScreen(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 130.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (searchQuery.isEmpty() && genreFilter == null && yearFilter == null) {
+                if (searchQuery.isEmpty() && genreFilter == null && yearFilter == null && countryFilter == null) {
                     item {
                         Text(
-                            text = tr(lang, "کشف سریع و مودها", "Explore & Browse All"),
+                            text = tr(
+                                lang,
+                                "کشف سریع و دسته‌بندی‌های ${selectedCountry.nameFa} ${selectedCountry.flag}",
+                                "Explore & Browse ${selectedCountry.nameEn} ${selectedCountry.flag}"
+                            ),
                             style = MaterialTheme.typography.titleMedium,
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold,
@@ -262,7 +266,7 @@ fun SearchScreen(
                         )
 
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            CountriesData.moodCategories.chunked(2).forEach { pair ->
+                            CountriesData.getMoodCategoriesForCountry(selectedCountry).chunked(2).forEach { pair ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
