@@ -1,0 +1,232 @@
+# تحلیل نسخه 1.4
+**گزارش باگ‌ها، روش اصلاح، بازبینی رابط کاربری و پیشنهادهای بهبود**
+* **پروژه:** MeloGroove 
+* **مخزن:** [GitHub Repository](https://github.com/Mehdi-bagheri68/melody1/tree/main)[span_0](start_span)[span_0](end_span)
+* **نسخه مشاهده‌شده در فایل Gradle:** versionName = 1.4.0 ، versionCode = 4[span_1](start_span)[span_1](end_span)
+* **مخاطب:** تیم توسعه و مسئول پیاده‌سازی اصلاحات[span_2](start_span)[span_2](end_span)
+* **وضعیت سند:** تحلیل ایستا از سورس‌کد شاخه main؛ نیازمند تأیید با Build، اجرای APK و تست روی دستگاه واقعی.[span_3](start_span)[span_3](end_span)
+
+---
+
+## محدودوده و ملاحظه بسیار مهم
+این سند فقط گزارش فنی و پیشنهاد اصلاح است. در جریان تهیه آن هیچ فایل سورس، تنظیمات، شماره نسخه، APK یا محتوای مخزن GitHub تغییر داده نشده است. توسعه‌دهنده باید اصلاحات را در شاخه جداگانه انجام دهد و تا زمان تأیید مالک پروژه، نسخه فعلی 1.4.0 را دست‌نخورده نگه دارد[span_4](start_span)[span_4](end_span).
+
+بازبینی UI بر مبنای کد Jetpack Compose انجام شده است؛ تصویر/ویدئوی اجرای واقعی، اندازه‌گیری روی دستگاه‌های مختلف و تست دسترس‌پذیری در اختیار نبوده است. بنابراین موارد UI به‌عنوان ریسک یا پیشنهاد مبتنی بر کد ثبت شده‌اند، نه ادعای مشاهده قطعی ظاهر اجراشده[span_5](start_span)[span_5](end_span).
+
+---
+
+## خلاصه مدیریتی
+مهم‌ترین ریسک نسخه فعلی، صحت داده و منبع فایل صوتی است: در برخی مسیرها URL نامعتبر با یک آهنگ ثابت جایگزین می‌شود؛ بنابراین ممکن است عنوان و خواننده نمایش‌داده‌شده با صدای واقعی همخوان نباشد. پس از آن، حلقه تلاش مجدد نامحدود پخش، استخراج شکننده اطلاعات از HTML سایت‌ها، کش بدون انقضا/همگام‌سازی، و تنظیماتی که مقدارشان تغییر می‌کند اما اثر عملیاتی‌شان اثبات نشده، در اولویت اصلاح قرار دارند[span_6](start_span)[span_6](end_span).
+
+| اولویت | موضوع | اثر بالقوه |
+| :--- | :--- | :--- |
+| **بحرانی** | جایگزینی URL نامعتبر با آهنگ ثابت | پخش آهنگ اشتباه و فساد تجربه کاربر[span_7](start_span)[span_7](end_span) |
+| **بحرانی** | Retry نامحدود و یکسان برای خطاهای موقت/دائمی | گیرکردن پلیر، مصرف شبکه/باتری و نبود پیام خطا[span_8](start_span)[span_8](end_span) |
+| **بالا** | استخراج HTML و اعتبارسنجی ناکافی منابع | شکست جستجو یا نمایش اطلاعات نادرست پس از تغییر سایت[span_9](start_span)[span_9](end_span) |
+| **بالا** | تنظیمات کیفیت صدا و حالت بدون VPN | نمایش قابلیت‌هایی که اثر واقعی آنها روشن نیست[span_10](start_span)[span_10](end_span) |
+| **بالا** | وضعیت بارگذاری Trending | نمایش نادرست Loading و تجربه نامطمئن[span_11](start_span)[span_11](end_span) |
+| **متوسط** | کش MutableMap بدون TTL/سیاست همگام‌سازی | نتایج قدیمی یا ناسازگاری در درخواست‌های هم‌زمان[span_12](start_span)[span_12](end_span) |
+| **متوسط** | WakeLock/WifiLock و چرخه عمر سرویس | مصرف باتری و احتمال باقی‌ماندن منابع[span_13](start_span)[span_13](end_span) |
+| **متوسط** | RTL، دسترس‌پذیری و تراکم اجزای UI | ناخوانایی/برش محتوا روی نمایشگرهای کوچک و فونت بزرگ[span_14](start_span)[span_14](end_span) |
+
+---
+
+## ۱. باگ‌ها و روش صحیح رفع
+
+### BUG-01 | جایگزینی آهنگ‌های نامعتبر با یک MP3 ثابت
+* **اولویت:** بحرانی[span_15](start_span)[span_15](end_span)
+* **محل بررسی:** `MusicRepository.kt` — تابع `sanitizeStoredTrack`؛ همچنین منطق پاک‌سازی/جایگزینی URL در مسیرهای دیگر Repository و `MusicPlayerController` باید جست‌وجو شود[span_16](start_span)[span_16](end_span).
+* **شرح مشکل:** اگر `previewUrl` خالی یا شامل دامنه/عبارت‌های مشخص‌شده باشد، یک URL ثابت مربوط به آهنگ «رود سوخته» جایگزین می‌شود. در نتیجه Trackهای متفاوت می‌توانند یک فایل واحد پخش کنند؛ متادیتا با صوت مغایر می‌شود. این رفتار در `sanitizeStoredTrack` به‌صورت مستقیم در کد دیده می‌شود[span_17](start_span)[span_17](end_span).
+* **روال اصلاح پیشنهادی:** جایگزینی خودکار با آهنگ دیگر حذف شود. URL نامعتبر باید به وضعیت `SourceUnavailable/InvalidSource` منجر شود. در صورت وجود چند منبع معتبر، Resolver باید منبع بعدی همان Track را امتحان کند؛ اگر هیچ منبعی نبود، پیام خطای قابل فهم نمایش داده و Track بعدی فقط طبق سیاست روشن صف پیشنهاد شود. هر منبع باید با شناسه Track، عنوان/هنرمند و مدت تقریبی تطبیق داده شود. کاور جایگزین نباید باعث جعل هویت آهنگ شود[span_18](start_span)[span_18](end_span).
+* **معیار پذیرش:** Track با URL خالی نباید آهنگ دیگری پخش کند؛ Track با منبع سالم همان آهنگ را پخش کند؛ عنوان/هنرمند/کاور/مدت در Player و Notification با فایل پخش‌شده منطبق باشند[span_19](start_span)[span_19](end_span).
+
+### BUG-02 | Retry نامحدود و نبود تفکیک خطاهای دائمی
+* **اولویت:** بحرانی[span_20](start_span)[span_20](end_span)
+* **محل بررسی:** `MusicPlayerController.kt` — `continuousLoadErrorPolicy`، `onPlayerError`، `startContinuousRetryLoop`، `attemptResumeCurrentTrack`[span_21](start_span)[span_21](end_span)
+* **شرح مشکل:** `DefaultLoadErrorHandlingPolicy` با تعداد تلاش بسیار بالا و حلقه retry هر ۲.۵ ثانیه تعریف شده است. خطاهای 403/404/410، محدودیت 429، خطای احراز دسترسی و خطاهای موقت شبکه نباید یکسان مدیریت شوند. حلقه می‌تواند بی‌نهایت ادامه یابد و وضعیت UI را در Buffering/Retrying نگه دارد[span_22](start_span)[span_22](end_span).
+* **روال اصلاح پیشنهادی:** خطاها طبقه‌بندی شوند: خطای اتصال/Timeout و 5xx با Backoff نمایی و سقف تلاش؛ 429 با رعایت Retry-After؛ 401/403/404/410 به‌عنوان خطای منبع/دسترسی بدون retry بی‌پایان؛ خطای فرمت/Decoder بدون retry شبکه. تعداد تلاش، زمان آخرین تلاش و علت خطا در StateFlow وضعیت پخش منتشر شود. دکمه تلاش مجدد دستی و امکان رد کردن منبع/آهنگ اضافه شود. Retry داخلی Media3 نیز با حلقه سطح اپلیکیشن هماهنگ شود تا دو حلقه متداخل نسازند[span_23](start_span)[span_23](end_span).
+* **معیار پذیرش:** با قطع اینترنت، پلیر با برگشت اینترنت در محدوده زمانی مشخص ادامه دهد؛ با 404/403 پس از تعداد محدود تلاش متوقف و پیام مناسب نشان دهد؛ با توقف دستی کاربر retry فعال نشود[span_24](start_span)[span_24](end_span).
+
+### BUG-03 | بازیابی موقعیت و MediaItem در تلاش مجدد
+* **اولویت:** بالا[span_25](start_span)[span_25](end_span)
+* **محل بررسی:** `MusicPlayerController.kt` — `attemptResumeCurrentTrack`[span_26](start_span)[span_26](end_span)
+* **شرح مشکل:** در حالت `mediaItemCount > 0`، کد صرفاً `seekTo` انجام می‌دهد و بررسی نمی‌کند MediaItem موجود متعلق به همان Track/URL است. اگر صف یا Track عوض شده باشد، امکان seek روی آیتم قبلی و آماده‌سازی منبع نامرتبط وجود دارد. همچنین `lastKnownPositionMs` باید هنگام تغییر Track و توقف کاربر به‌درستی پاک/ثبت شود[span_27](start_span)[span_27](end_span).
+* **روال اصلاح پیشنهادی:** پیش از resume، `mediaId` یا URI آیتم جاری با Track فعلی تطبیق داده شود. اگر متفاوت بود، `setMediaItem(track, resumePosition)` انجام شود؛ اگر یکسان بود `seekTo`. موقعیت فقط در محدوده duration معتبر نگهداری شود. تغییر آهنگ، Stop، Clear و پایان طبیعی باید وضعیت retry و position قبلی را پاک کنند[span_28](start_span)[span_28](end_span).
+* **معیار پذیرش:** پس از خطای شبکه و سپس Next/Previous، آهنگ قبلی دوباره جایگزین آهنگ جدید نشود؛ Resume از موقعیت معتبر همان Track انجام شود[span_29](start_span)[span_29](end_span).
+
+### BUG-04 | استخراج اطلاعات موسیقی از HTML با Regex
+* **اولویت:** بالا[span_30](start_span)[span_30](end_span)
+* **محل بررسی:** `MusicRepository.kt` — مسیر `fetchLiveFromMusicsFa` و هر parser مبتنی بر HTML[span_31](start_span)[span_31](end_span)
+* **شرح مشکل:** تغییر جزئی DOM/HTML، کدگذاری فارسی، ترتیب attributeها، lazy loading یا محدودیت ضدربات می‌تواند Regex را بشکند. نبود نتیجه یا استخراج اشتباه عنوان/هنرمند/لینک محتمل است[span_32](start_span)[span_32](end_span).
+* **روال اصلاح پیشنهادی:** Parser مستقل با تست fixture برای HTMLهای نمونه ساخته شود؛ اولویت با API رسمی/فید ساختاریافته و مجاز باشد. خروجی parser به DTO خام تبدیل و سپس اعتبارسنجی شود. خطاهای HTTP، تغییر ساختار، CAPTCHA و نتیجه خالی جداگانه گزارش شوند. برای هر منبع Adapter مستقل و قابلیت غیرفعال‌سازی موقت منبع خراب در نظر گرفته شود[span_33](start_span)[span_33](end_span).
+* **معیار پذیرش:** با HTML نمونه و تغییرات متداول، parser تست خودکار داشته باشد؛ شکست یک منبع باعث از کار افتادن کل جستجو نشود[span_34](start_span)[span_34](end_span).
+
+### BUG-05 | مدت ثابت برای نتایج استخراج‌شده
+* **اولویت:** بالا[span_35](start_span)[span_35](end_span)
+* **محل بررسی:** `MusicRepository.kt` — مسیر دریافت زنده که `durationMs` را مقدار ثابت 215000 قرار می‌دهد (طبق کد بررسی‌شده)[span_36](start_span)[span_36](end_span)
+* **شرح مشکل:** مدت ثابت باعث نوار پیشرفت نادرست، پایان زودهنگام/دیرهنگام نمایش، Seek غیرواقعی و اطلاعات نادرست می‌شود[span_37](start_span)[span_37](end_span).
+* **روال اصلاح پیشنهادی:** مدت از متادیتای معتبر منبع/API یا MediaMetadata/Media3 پس از آماده شدن Player دریافت شود. اگر مدت نامعلوم است `null`/0 به‌عنوان نامعلوم نگهداری و Slider تا دریافت duration غیرفعال باشد؛ مقدار تخمینی به‌عنوان مدت قطعی ثبت نشود[span_38](start_span)[span_38](end_span).
+* **معیار پذیرش:** برای Trackهای با طول‌های متفاوت، duration پس از آماده شدن Player درست باشد؛ در حالت نامعلوم نوار پیشرفت رفتار امن داشته باشد[span_39](start_span)[span_39](end_span).
+
+### BUG-06 | کش جستجوی بدون انقضا و همگام‌سازی
+* **اولویت:** متوسط[span_40](start_span)[span_40](end_span)
+* **محل بررسی:** `MusicRepository.kt` — `searchCache: MutableMap<String, List<Track>>`[span_41](start_span)[span_41](end_span)
+* **شرح مشکل:** کش MutableMap مشترک ممکن است از Coroutineهای هم‌زمان خوانده/نوشته شود. TTL، سقف ظرفیت، پاک‌سازی و سیاست تازه‌سازی مشخص نیست. وضعیت Favorite نیز ممکن است در نتایج cache‌شده قدیمی بماند[span_42](start_span)[span_42](end_span).
+* **روال اصلاح پیشنهادی:** از Mutex یا ساختار concurrent مناسب استفاده شود؛ کلید کش نرمال‌سازی‌شده باشد؛ TTL و سقف تعداد ورودی تعریف شود؛ نتایج Favorite هنگام نمایش با منبع حقیقت Room ادغام شوند. برای خطاهای شبکه، نتیجه خالی دائمی cache نشود. امکان invalidate هنگام تغییر فیلتر/کشور و تغییر منبع داده فراهم شود[span_43](start_span)[span_43](end_span).
+* **معیار پذیرش:** در جستجوهای هم‌زمان Crash/Race رخ ندهد؛ پس از Favorite/Unfavorite نتیجه به‌روز باشد؛ داده منقضی پس از TTL دوباره واکشی شود[span_44](start_span)[span_44](end_span).
+
+### BUG-07 | isLoadingTrending در مسیر بارگذاری فعال نمی‌شود
+* **اولویت:** متوسط[span_45](start_span)[span_45](end_span)
+* **محل بررسی:** `MainViewModel.kt` — `loadTrendingForCountry`[span_46](start_span)[span_46](end_span)
+* **شرح مشکل:** در مسیر قابل مشاهده، تابع مقدار `_isLoadingTrending` را در شروع `true` نمی‌کند و در انتها `false` می‌کند. در نتیجه UI ممکن است Spinner را نشان ندهد و حالت Loading عملاً بی‌اثر باشد[span_47](start_span)[span_47](end_span).
+* **روال اصلاح پیشنهادی:** در ابتدای عملیات `true` و در `finally` `false` تنظیم شود. خطا نیز به state مستقل Error/Retry تبدیل شود. درخواست‌های قبلی هنگام تغییر سریع کشور لغو شوند یا با Job/نسخه درخواست کنترل شوند تا پاسخ قدیمی روی کشور جدید ننشیند[span_48](start_span)[span_48](end_span).
+* **معیار پذیرش:** هنگام بارگذاری کشور Spinner دیده شود؛ پاسخ دیررس کشور قبلی نتایج کشور جدید را overwrite نکند؛ در خطا پیام و Retry قابل مشاهده باشد[span_49](start_span)[span_49](end_span).
+
+### BUG-08 | درخواست‌های هم‌زمان و لغو نشدن بارگذاری‌ها
+* **اولویت:** متوسط[span_50](start_span)[span_50](end_span)
+* **محل بررسی:** `MainViewModel.kt` — `loadTrendingForCountry`، `selectCountry`، `selectMood`، `loadArtistTracks`[span_51](start_span)[span_51](end_span)
+* **شرح مشکل:** در چند مسیر `viewModelScope.launch` مستقل ایجاد می‌شود. تغییر سریع کشور/حال‌وهوا/مرتب‌سازی می‌تواند چند درخواست هم‌زمان بسازد و پاسخ قدیمی پس از پاسخ جدید ثبت شود. در `loadArtistTracks` نیز وضعیت Loading باید در finally خاموش شود[span_52](start_span)[span_52](end_span).
+* **روال اصلاح پیشنهادی:** برای هر نوع بارگذاری Job نگهداری و درخواست قبلی cancel شود؛ یا از `flatMapLatest`/`debounce` استفاده شود. قبل از ثبت پاسخ، پارامترهای انتخابی فعلی با پارامتر درخواست تطبیق داده شوند. تمام مسیرها try/catch/finally داشته باشند[span_53](start_span)[span_53](end_span).
+* **معیار پذیرش:** تغییر سریع فیلتر/کشور باعث نمایش نتیجه آخرین انتخاب شود، نه نتیجه درخواست قدیمی[span_54](start_span)[span_54](end_span).
+
+### BUG-09 | تنظیم کیفیت صدا صرفاً مقدار UI را تغییر می‌دهد
+* **اولویت:** بالا[span_55](start_span)[span_55](end_span)
+* **محل بررسی:** `MusicPlayerController.kt`، `SettingsScreen.kt`، `FullPlayerSheet.kt`[span_56](start_span)[span_56](end_span)
+* **شرح مشکل:** در کد بررسی‌شده `setAudioQuality` مقدار StateFlow را تغییر می‌دهد؛ اما مسیر انتخاب منبع/بیت‌ریت یا درخواست stream بر اساس آن مشخص نیست. بنابراین نمایش گزینه کیفیت ممکن است اثر واقعی نداشته باشد[span_57](start_span)[span_57](end_span).
+* **روال اصلاح پیشنهادی:** ابتدا قرارداد محصول تعیین شود: اگر منبع‌ها نسخه‌های کیفیت متفاوت دارند، Resolver بر اساس AudioQuality منبع مناسب را انتخاب کند و در تغییر کیفیت با حفظ position، MediaItem جدید آماده شود. اگر منبع کیفیت انتخابی ندارد، UI باید «کیفیت در دسترس نیست/خودکار» نشان دهد و ادعای تغییر کیفیت نکند. تغییر کیفیت نباید فقط label را عوض کند[span_58](start_span)[span_58](end_span).
+* **معیار پذیرش:** در تست شبکه/فایل، کیفیت یا URL انتخابی با تنظیم UI قابل اثبات باشد؛ در نبود نسخه جایگزین پیام محدودیت نمایش داده شود[span_59](start_span)[span_59](end_span).
+
+### BUG-10 | حالت Iran No-VPN بدون اثر عملیاتی اثبات‌شده
+* **اولویت:** بالا[span_60](start_span)[span_60](end_span)
+* **محل بررسی:** `MusicPlayerController.kt` — `iranNoVpnMode` و مسیر انتخاب منبع[span_61](start_span)[span_61](end_span)
+* **شرح مشکل:** متغیر `iranNoVpnMode` در StateFlow تغییر می‌کند؛ در مسیرهای بررسی‌شده، اتصال آن به انتخاب منبع، تست دسترسی یا رفتار شبکه اثبات نشد. این می‌تواند یک کنترل ظاهری باشد[span_62](start_span)[span_62](end_span).
+* **روال اصلاح پیشنهادی:** معنای دقیق گزینه تعریف شود. اگر هدف انتخاب منابع قابل دسترس بدون VPN است، SourceResolver باید probe امن/زمان‌دار و سیاست اولویت‌بندی داشته باشد. از ادعای تضمین دسترسی بدون VPN پرهیز شود؛ نتیجه بر اساس شبکه فعلی و منطقه کاربر متغیر است. اگر قابلیت قابل پیاده‌سازی نیست، کنترل از UI حذف یا غیرفعال و توضیح داده شود[span_63](start_span)[span_63](end_span).
+* **معیار پذیرش:** با فعال/غیرفعال کردن گزینه، تفاوت قابل اندازه‌گیری در انتخاب منبع رخ دهد؛ در غیر این صورت گزینه به‌عنوان قابلیت عملیاتی عرضه نشود[span_64](start_span)[span_64](end_span).
+
+### BUG-11 | مدیریت منابع WakeLock/WifiLock و callback شبکه
+* **اولویت:** متوسط[span_65](start_span)[span_65](end_span)
+* **محل بررسی:** `MusicPlayerController.kt` — `initLocks`، `acquirePlaybackLocks`، `releasePlaybackLocks`، `registerNetworkCallback`[span_66](start_span)[span_66](end_span)
+* **شرح مشکل:** WakeLock تا چهار ساعت acquire می‌شود و WifiLock نیز هنگام پخش/بافرگیری گرفته می‌شود. callback شبکه register می‌شود اما مسیر unregister در کد بررسی‌شده مشخص نیست. catchهای خالی عیب‌یابی را دشوار می‌کنند. مصرف باتری و باقی‌ماندن callback باید بررسی شود[span_67](start_span)[span_67](end_span).
+* **روال اصلاح پیشنهادی:** تا حد امکان به Media3 wake mode و Foreground MediaSession تکیه شود؛ Lock اضافی فقط با دلیل و در زمان لازم گرفته شود. callback در چرخه عمر کنترلر/سرویس unregister شود. همه acquireها باید جفت release و در onDestroy/stop/idle پوشش داده شوند. خطاها با Logger امن ثبت شوند[span_68](start_span)[span_68](end_span).
+* **معیار پذیرش:** پس از Stop/خروج/پایان پخش، Lock آزاد و callback unregister شود؛ تست مصرف باتری و اجرای طولانی انجام شود[span_69](start_span)[span_69](end_span).
+
+### BUG-12 | HttpLoggingInterceptor با سطح BODY
+* **اولویت:** بالا در Release[span_70](start_span)[span_70](end_span)
+* **محل بررسی:** `ItunesApi.kt` — `ApiClient`[span_71](start_span)[span_71](end_span)
+* **شرح مشکل:** Logging سطح BODY می‌تواند اطلاعات درخواست/پاسخ، داده‌های حجیم یا اطلاعات حساس احتمالی را در Logcat ثبت کند و مصرف I/O و حجم لاگ را افزایش دهد[span_72](start_span)[span_72](end_span).
+* **روال اصلاح پیشنهادی:** Interceptor فقط در Debug فعال شود؛ در Release حذف یا به BASIC محدود شود. هیچ token، header محرمانه یا query حساس ثبت نشود. لاگ‌ها با سطح و retention کنترل‌شده باشند[span_73](start_span)[span_73](end_span).
+* **معیار پذیرش:** در Build نوع Release هیچ body حساس یا لاگ verbose ثبت نشود[span_74](start_span)[span_74](end_span).
+
+### BUG-13 | Catchهای خالی و از دست رفتن علت خطا
+* **اولویت:** متوسط[span_75](start_span)[span_75](end_span)
+* **محل بررسی:** `MusicPlayerController.kt` و سایر لایه‌های Repository/ViewModel[span_76](start_span)[span_76](end_span)
+* **شرح مشکل:** چند بلوک catch خالی دیده می‌شود. این کار شکست acquire lock، start service، ثبت callback یا عملیات داده را بی‌صدا پنهان می‌کند[span_77](start_span)[span_77](end_span).
+* **روال اصلاح پیشنهادی:** خطاها به sealed result/state تبدیل شوند؛ لاگ ساختاریافته با نام عملیات، نوع exception و شناسه درخواست ثبت شود؛ اطلاعات محرمانه و URLهای دارای token mask شوند. UI فقط پیام قابل فهم دریافت کند[span_78](start_span)[span_78](end_span).
+* **معیار پذیرش:** برای هر failure مهم، علت در Debug log قابل ردیابی باشد و UI در حالت نامشخص/بی‌پاسخ نماند[span_79](start_span)[span_79](end_span).
+
+### BUG-14 | پاک‌سازی Trackهای ذخیره‌شده و تطبیق ID
+* **اولویت:** متوسط[span_80](start_span)[span_80](end_span)
+* **محل بررسی:** `MusicRepository.kt` — `sanitizeStoredTrack` و `getAllCuratedFullTracks`[span_81](start_span)[span_81](end_span)
+* **شرح مشکل:** Trackهای Room با کاتالوگ ثابت بر اساس id تطبیق داده می‌شوند. اگر ID تکراری/تغییرکرده یا متعلق به منبع دیگری باشد، ممکن است متادیتا/URL نسخه curated جایگزین شود. تطبیق صرف ID برای چند منبع کافی نیست[span_82](start_span)[span_82](end_span).
+* **روال اصلاح پیشنهادی:** شناسه پایدار مرکب یا `sourceId + sourceTrackId` تعریف شود. مهاجرت داده با نسخه schema و mapping صریح انجام شود. فقط فیلترهای واقعاً منسوخ migrate شوند؛ Favorite و Playlist و History حفظ شوند[span_83](start_span)[span_83](end_span).
+* **معیار پذیرش:** پس از به‌روزرسانی اپ، آهنگ‌های ذخیره‌شده به آهنگ دیگری تبدیل نشوند و داده کاربر از بین نرود[span_84](start_span)[span_84](end_span).
+
+---
+
+## ۲. بازبینی رابط کاربری (UI/UX)
+صفحات بررسی‌شده از روی کد شامل Home، Search، Library، Settings، FullPlayerSheet، MiniPlayer و اجزای مشترک Compose هستند. طراحی فعلی از تم تاریک OLED، رنگ طلایی، کارت‌های گرد، ردیف‌های افقی و پشتیبانی زبان فارسی/انگلیسی استفاده می‌کند. پیشنهادهای زیر برای افزایش خوانایی، پیش‌بینی‌پذیری و دسترس‌پذیری است[span_85](start_span)[span_85](end_span).
+
+* **UI-01 | Home — تراکم بخش دسته‌بندی‌ها:** دسته‌ها در LazyVerticalGrid یا آیتم‌های LazyColumn با key پایدار نمایش داده شوند؛ ارتفاع کارت و فاصله‌ها با اندازه نمایشگر سازگار شود[span_86](start_span)[span_86](end_span).
+* **UI-02 | Home — بارگذاری، خطا و حالت خالی:** برای هر بخش skeleton یا progress کم‌مزاحمت، پیام Empty واقعی و دکمه تلاش مجدد نمایش داده شود[span_87](start_span)[span_87](end_span).
+* **UI-03 | Search — بازخورد جستجو و فیلترها:** فیلترهای پیشرفته در BottomSheet یا پنل جمع‌شونده قرار گیرند؛ تعداد فیلترهای فعال و دکمه پاک‌کردن همه نمایش داده شود[span_88](start_span)[span_88](end_span).
+* **UI-04 | Search — صفحه‌کلید و IME:** اقدام `ImeAction.Search`، `KeyboardActions`، مدیریت فوکوس و امکان پاک‌کردن سریع اضافه شود[span_89](start_span)[span_89](end_span).
+* **UI-05 | Library — حفظ تب و وضعیت:** از `rememberSaveable` استفاده شود و تعداد Favorite/Playlist/History در عنوان تب یا header نمایش داده شود[span_90](start_span)[span_90](end_span).
+* **UI-06 | Library — تأیید عملیات مخرب:** برای پاک‌کردن تاریخچه و حذف Playlist دیالوگ تأیید با تعداد موارد و امکان لغو در نظر گرفته شود[span_91](start_span)[span_91](end_span).
+* **UI-07 | MiniPlayer — وضعیت خطا و فضای کنترلی:** به‌جای عدد خام، پیام کوتاه «در حال اتصال مجدد…»، «منبع در دسترس نیست» و دکمه Retry/Next نمایش داده شود[span_92](start_span)[span_92](end_span).
+* **UI-08 | Full Player — Seek و مدت نامعتبر:** Slider در duration نامعلوم غیرفعال و متن زمان به‌صورت `--:--` نمایش داده شود[span_93](start_span)[span_93](end_span).
+* **UI-09 | Full Player — انیمیشن و مصرف منابع:** انیمیشن چرخش Vinyl فقط هنگام پخش فعال باشد؛ هنگام توقف/خروج از Composition متوقف شود[span_94](start_span)[span_94](end_span).
+* **UI-10 | Settings — شفافیت گزینه‌ها:** برای هر گزینه توضیح یک‌خطی و وضعیت فعلی ارائه شود؛ گزینه غیرقابل پشتیبانی disabled همراه دلیل باشد[span_95](start_span)[span_95](end_span).
+* **UI-11 | RTL/LTR و متن‌های ترکیبی:** از BidiFormatter/Unicode isolation برای رشته‌های لاتین داخل فارسی استفاده شود[span_96](start_span)[span_96](end_span).
+* **UI-12 | دسترس‌پذیری و اندازه لمس:** برای تمام کنترل‌های عملیاتی `contentDescription` محلی‌سازی‌شده تعریف شود؛ حداقل touch target برابر 48dp باشد[span_97](start_span)[span_97](end_span).
+* **UI-13 | اندازه فونت و نمایشگر کوچک:** تست با Font Scale 1.0، 1.3 و 1.5، عرض 320dp و حالت landscape انجام شود[span_98](start_span)[span_98](end_span).
+* **UI-14 | تصاویر کاور و Placeholder:** Placeholder خنثی و متفاوت از کاور واقعی طراحی شود؛ خطای کاور باعث نمایش تصویر جعلی به‌عنوان آلبوم واقعی نشود[span_99](start_span)[span_99](end_span).
+
+---
+
+## ۳. پیشنهادهای بهبود محصول و کیفیت
+* **بهبود معماری منابع موسیقی:** ایجاد لایه `SourceResolver` با Adapter مستقل برای هر منبع[span_100](start_span)[span_100](end_span).
+* **شناسه پایدار آهنگ:** استفاده از شناسه داخلی پایدار و شناسه منبع بجای title+artist[span_101](start_span)[span_101](end_span).
+* **اعتبارسنجی قبل از نمایش نتیجه:** عدم ورود نتیجه جستجو به لیست پخش تا زمان داشتن title، artist و URL معتبر[span_102](start_span)[span_102](end_span).
+* **سلامت‌سنجی منبع:** نگهداری زمان آخرین موفقیت، نرخ خطا و latency برای هر Source[span_103](start_span)[span_103](end_span).
+* **مشاهده‌پذیری و گزارش خطا:** تعریف مدل `PlaybackError` با code، source، recoverable و userMessage[span_104](start_span)[span_104](end_span).
+* **تست خودکار:** اضافه کردن تست واحد برای Repository، Parser، ViewModel و Playback Controller[span_105](start_span)[span_105](end_span).
+* **پایداری داده کاربر:** پوشش Room migrationها، Favorite، History و Playlist با تست مهاجرت[span_106](start_span)[span_106](end_span).
+* **عملکرد و مصرف باتری:** اندازه‌گیری مصرف باتری در ۳۰، ۶۰ و ۱۲۰ دقیقه پخش پس‌زمینه[span_107](start_span)[span_107](end_span).
+* **حریم خصوصی و انتشار:** حذف Logging سطح BODY در Release و بررسی secrets پیش از انتشار[span_108](start_span)[span_108](end_span).
+
+---
+
+## ۴. برنامه اجرایی پیشنهادی برای توسعه‌دهنده
+* **فاز ۰ — تثبیت مبنا:** ثبت commit فعلی، ساخت شاخه `fix/1.4.0-audit`، اجرای Build و تست smoke[span_109](start_span)[span_109](end_span).
+* **فاز ۱ — اصلاح بحرانی:** BUG-01 تا BUG-03؛ جلوگیری از پخش فایل اشتباه و کنترل Retry/Resume[span_110](start_span)[span_110](end_span).
+* **فاز ۲ — منابع و داده:** BUG-04 تا BUG-08 و BUG-14؛ parser، مدت، کش و درخواست‌های هم‌زمان[span_111](start_span)[span_111](end_span).
+* **فاز ۳ — قابلیت‌های تنظیمات:** BUG-09 و BUG-10؛ کیفیت و No-VPN یا حذف/غیرفعال‌سازی کنترل بی‌اثر[span_112](start_span)[span_112](end_span).
+* **فاز ۴ — سرویس و امنیت:** BUG-11 تا BUG-13؛ Lock، callback، logging و خطاها[span_113](start_span)[span_113](end_span).
+* **فاز ۵ — UI/UX:** UI-01 تا UI-14 بر اساس اولویت و تست واقعی[span_114](start_span)[span_114](end_span).
+* **فاز ۶ — تأیید نهایی:** اجرای ماتریس تست، بررسی مصرف باتری و بازبینی تغییرات[span_115](start_span)[span_115](end_span).
+
+---
+
+## ۵. ماتریس تست پذیرش (QA)
+* **QA-01:** پخش Track با URL معتبر ➔ همان آهنگ و متادیتای درست پخش شود[span_116](start_span)[span_116](end_span).
+* **QA-02:** پخش Track با URL خالی/404 ➔ هیچ MP3 ثابت یا آهنگ دیگری جایگزین نشود؛ خطای قابل فهم نمایش داده شود[span_117](start_span)[span_117](end_span).
+* **QA-03:** قطع اینترنت هنگام پخش و وصل مجدد ➔ Resume از موقعیت معتبر همان Track انجام شود[span_118](start_span)[span_118](end_span).
+* **QA-04:** خطای 403 و 404 ➔ Retry نامحدود رخ ندهد؛ منبع نامعتبر مشخص شود[span_119](start_span)[span_119](end_span).
+* **QA-05:** خطای 429 و 5xx ➔ Backoff و Retry-After رعایت شود[span_120](start_span)[span_120](end_span).
+* **QA-06:** تغییر آهنگ هنگام Retry ➔ Retry آهنگ قبلی روی Track جدید اثر نگذارد[span_121](start_span)[span_121](end_span).
+* **QA-07:** تغییر سریع کشور/مود/مرتب‌سازی ➔ فقط نتیجه آخرین انتخاب نمایش داده شود[span_122](start_span)[span_122](end_span).
+* **QA-08:** جستجوهای موازی و تکراری ➔ Crash، race یا نتیجه cache ناسازگار رخ ندهد[span_123](start_span)[span_123](end_span).
+* **QA-09:** Favorite/Unfavorite در نتیجه کش‌شده ➔ وضعیت فوراً با Room همگام شود[span_124](start_span)[span_124](end_span).
+* **QA-10:** تغییر کیفیت صدا ➔ تغییر واقعی کیفیت/منبع قابل اثبات باشد یا گزینه غیرفعال شود[span_125](start_span)[span_125](end_span).
+* **QA-11:** تغییر زبان فارسی/انگلیسی ➔ چیدمان، متن‌های ترکیبی و آیکن‌های جهت‌دار صحیح باشند[span_126](start_span)[span_126](end_span).
+* **QA-12:** Font Scale بزرگ و عرض 320dp ➔ متن و کنترل اصلی بریده یا غیرقابل لمس نشوند[span_127](start_span)[span_127](end_span).
+* **QA-13:** TalkBack ➔ تمام کنترل‌های عملیاتی نام و نقش قابل فهم داشته باشند[span_128](start_span)[span_128](end_span).
+* **QA-14:** پخش پس‌زمینه ۱۲۰ دقیقه ➔ سرویس پایدار، مصرف باتری قابل قبول و Lockها مدیریت شوند[span_129](start_span)[span_129](end_span).
+* **QA-15:** بستن اجباری/راه‌اندازی مجدد و بازگشت به اپ ➔ وضعیت پخش و داده‌های کاربر بازیابی شوند[span_130](start_span)[span_130](end_span).
+* **QA-16:** نصب روی نسخه قبلی دارای Favorite/Playlist ➔ مهاجرت داده بدون حذف یا تغییر اشتباه انجام شود[span_131](start_span)[span_131](end_span).
+
+---
+
+## ۶. الزامات تحویل توسعه‌دهنده
+1. هیچ تغییری مستقیماً روی main یا نسخه منتشرشده انجام نشود؛ اصلاحات در شاخه مستقل و با Pull Request ارائه شود[span_132](start_span)[span_132](end_span).
+2. تا زمان تأیید مالک پروژه، versionName، versionCode، امضای برنامه و تنظیمات انتشار تغییر نکند[span_133](start_span)[span_133](end_span).
+3. برای هر BUG شناسه همین سند در عنوان Commit یا توضیح Pull Request ذکر شود[span_134](start_span)[span_134](end_span).
+4. برای هر اصلاح، تست بازتولید باگ قبل از اصلاح و تست موفق بعد از اصلاح ارائه شود[span_135](start_span)[span_135](end_span).
+5. هیچ منبع موسیقی یا URL جایگزینی صرفاً به دلیل در دسترس نبودن منبع اصلی به‌عنوان همان آهنگ معرفی نشود[span_136](start_span)[span_136](end_span).
+6. قابلیت‌هایی مانند کیفیت صدا، حالت بدون VPN و آمار ترند فقط زمانی فعال بمانند که رفتار واقعی و قابل آزمون داشته باشند[span_137](start_span)[span_137](end_span).
+7. تغییر UI باید با اسکرین‌شات قبل/بعد از فارسی و انگلیسی، عرض کم و Font Scale بزرگ تحویل شود[span_138](start_span)[span_138](end_span).
+8. در پایان، گزارش Build، تست‌های اجراشده، دستگاه‌ها/نسخه‌های Android، باگ‌های باقی‌مانده و ریسک‌های شناخته‌شده ضمیمه شود[span_139](start_span)[span_139](end_span).
+
+---
+
+## ۷. منابع کد بررسی‌شده
+* نسخه و تنظیمات Build — `app/build.gradle.kts`[span_140](start_span)[span_140](end_span)
+* Repository و کاتالوگ/پاک‌سازی Track — `app/src/main/java/com/example/data/repository/MusicRepository.kt`[span_141](start_span)[span_141](end_span)
+* کنترلر پخش — `app/src/main/java/com/example/playback/MusicPlayerController.kt`[span_142](start_span)[span_142](end_span)
+* سرویس پخش پس‌زمینه — `app/src/main/java/com/example/playback/MediaPlaybackService.kt`[span_143](start_span)[span_143](end_span)
+* ViewModel — `app/src/main/java/com/example/ui/MainViewModel.kt`[span_144](start_span)[span_144](end_span)
+* صفحه اصلی — `app/src/main/java/com/example/ui/screens/HomeScreen.kt`[span_145](start_span)[span_145](end_span)
+* جستجو — `app/src/main/java/com/example/ui/screens/SearchScreen.kt`[span_146](start_span)[span_146](end_span)
+* کتابخانه — `app/src/main/java/com/example/ui/screens/LibraryScreen.kt`[span_147](start_span)[span_147](end_span)
+* تنظیمات — `app/src/main/java/com/example/ui/screens/SettingsScreen.kt`[span_148](start_span)[span_148](end_span)
+* پلیر کامل و اجزای مشترک — `FullPlayerSheet.kt` و `CommonComponents.kt`[span_149](start_span)[span_149](end_span)
+* تم — `app/src/main/java/com/example/ui/theme/Theme.kt`[span_150](start_span)[span_150](end_span)
+* کلاینت iTunes — `app/src/main/java/com/example/data/api/ItunesApi.kt`[span_151](start_span)[span_151](end_span)
+* Manifest — `app/src/main/AndroidManifest.xml`[span_152](start_span)[span_152](end_span)
+
+---
+
+## ۸. جمع‌بندی
+پیشنهاد می‌شود توسعه‌دهنده ابتدا `BUG-01` تا `BUG-03` را اصلاح کند؛ زیرا این موارد مستقیماً به صحت پخش و اعتماد کاربر مربوط‌اند. پس از آن، منابع داده و وضعیت‌های خطا/بارگذاری تثبیت شوند و در مرحله بعد UI و دسترس‌پذیری اصلاح گردد. این سند مجوز تغییر نسخه منتشرشده نیست؛ هدف آن ارائه نقشه اصلاح کنترل‌شده و قابل آزمون برای تیم توسعه است[span_153](start_span)[span_153](end_span).
+
+**پایان سند**

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,8 +21,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,12 +36,19 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
@@ -48,6 +59,7 @@ import com.example.ui.LocalAppLanguage
 import com.example.ui.components.ModernMoodCard
 import com.example.ui.components.TrackItemCard
 import com.example.ui.theme.AccentGold
+import com.example.ui.theme.AccentOrange
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.OledBackground
 import com.example.ui.theme.OledSurface
@@ -77,9 +89,16 @@ fun SearchScreen(
     onArtistClick: (String) -> Unit,
     onStopTrackClick: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
-    onAddToPlaylistClick: (Track) -> Unit
+    onAddToPlaylistClick: (Track) -> Unit,
+    onSubmitSearch: () -> Unit = {},
+    onClearAllFilters: () -> Unit = {}
 ) {
     val lang = LocalAppLanguage.current
+    val focusManager = LocalFocusManager.current
+    var showAdvancedFilters by rememberSaveable { mutableStateOf(false) }
+
+    val activeFilterCount = listOfNotNull(genreFilter, yearFilter, countryFilter).size
+
     val genres = listOf(
         "پاپ" to tr(lang, "پاپ", "Pop"),
         "سنتی" to tr(lang, "سنتی", "Traditional"),
@@ -95,15 +114,79 @@ fun SearchScreen(
             .background(OledBackground)
             .statusBarsPadding()
     ) {
-        Text(
-            text = tr(lang, "جستجو و کشف", "Search & Explore"),
-            style = MaterialTheme.typography.headlineMedium,
-            color = TextPrimary,
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = tr(lang, "جستجو و کشف", "Search & Explore"),
+                style = MaterialTheme.typography.headlineMedium,
+                color = TextPrimary,
+                fontWeight = FontWeight.ExtraBold
+            )
 
-        // Search Input Bar
+            // UI-03: Collapsible Filter Toggle + Clear Filters button
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (activeFilterCount > 0) {
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClick = onClearAllFilters)
+                            .testTag("clear_all_filters_btn"),
+                        color = OledSurfaceHigh
+                    ) {
+                        Text(
+                            text = tr(lang, "پاک کردن فیلترها", "Clear All"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentOrange,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(
+                            width = 1.dp,
+                            color = if (showAdvancedFilters || activeFilterCount > 0) AccentGold else BorderSubtle,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .clickable { showAdvancedFilters = !showAdvancedFilters }
+                        .testTag("toggle_filters_btn"),
+                    color = if (showAdvancedFilters || activeFilterCount > 0) OledSurfaceHigh else OledSurfaceVariant
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (activeFilterCount > 0) {
+                                tr(lang, "فیلترها ($activeFilterCount)", "Filters ($activeFilterCount)")
+                            } else {
+                                tr(lang, "فیلترها", "Filters")
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentGold,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // Search Input Bar with ImeAction.Search (UI-04)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -130,7 +213,9 @@ fun SearchScreen(
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
                             onClick = { onQueryChanged("") },
-                            modifier = Modifier.testTag("clear_search_btn")
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("clear_search_btn")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
@@ -141,6 +226,13 @@ fun SearchScreen(
                     }
                 },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(
+                    onSearch = {
+                        focusManager.clearFocus()
+                        onSubmitSearch()
+                    }
+                ),
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = AccentGold,
@@ -156,59 +248,72 @@ fun SearchScreen(
             )
         }
 
-        // Multi-Criteria Filter Bar (Country Filter Chips)
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                FilterChip(
-                    label = tr(lang, "همه کشورها 🌐", "All Countries 🌐"),
-                    isSelected = countryFilter == null,
-                    onClick = { onCountryFilterChanged(null) }
-                )
-            }
-            items(CountriesData.allCountries) { country ->
-                FilterChip(
-                    label = "${country.flag} ${country.getDisplayName(lang)}",
-                    isSelected = countryFilter == country.code,
-                    onClick = {
-                        onCountryFilterChanged(if (countryFilter == country.code) null else country.code)
+        // Collapsible Multi-Criteria Filter Panel (UI-03)
+        AnimatedVisibility(visible = showAdvancedFilters || activeFilterCount > 0) {
+            Column {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item(key = "filter_all_countries") {
+                        FilterChip(
+                            label = tr(lang, "همه کشورها 🌐", "All Countries 🌐"),
+                            isSelected = countryFilter == null,
+                            onClick = { onCountryFilterChanged(null) }
+                        )
                     }
-                )
+                    items(
+                        items = CountriesData.allCountries,
+                        key = { "country_filter_${it.code}" }
+                    ) { country ->
+                        FilterChip(
+                            label = "${country.flag} ${country.getDisplayName(lang)}",
+                            isSelected = countryFilter == country.code,
+                            onClick = {
+                                onCountryFilterChanged(if (countryFilter == country.code) null else country.code)
+                            }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Genre and Year Filter Row (including 2026 & 2025)
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(
+                        items = genres,
+                        key = { "genre_filter_${it.first}" }
+                    ) { (genreKey, genreLabel) ->
+                        FilterChip(
+                            label = genreLabel,
+                            isSelected = genreFilter == genreKey,
+                            onClick = {
+                                onGenreFilterChanged(if (genreFilter == genreKey) null else genreKey)
+                            }
+                        )
+                    }
+                    items(
+                        items = years,
+                        key = { "year_filter_$it" }
+                    ) { year ->
+                        FilterChip(
+                            label = tr(lang, "سال $year", "Year $year"),
+                            isSelected = yearFilter == year,
+                            onClick = {
+                                onYearFilterChanged(if (yearFilter == year) null else year)
+                            }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Genre and Year Filter Row (including 2026 & 2025)
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(genres) { (genreKey, genreLabel) ->
-                FilterChip(
-                    label = genreLabel,
-                    isSelected = genreFilter == genreKey,
-                    onClick = {
-                        onGenreFilterChanged(if (genreFilter == genreKey) null else genreKey)
-                    }
-                )
-            }
-            items(years) { year ->
-                FilterChip(
-                    label = tr(lang, "سال $year", "Year $year"),
-                    isSelected = yearFilter == year,
-                    onClick = {
-                        onYearFilterChanged(if (yearFilter == year) null else year)
-                    }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
 
         // Search Results / Explore Grid
         if (isSearching) {
@@ -220,7 +325,7 @@ fun SearchScreen(
             ) {
                 CircularProgressIndicator(color = AccentGold)
             }
-        } else if (searchQuery.isNotEmpty() && searchResults.isEmpty()) {
+        } else if ((searchQuery.isNotEmpty() || activeFilterCount > 0) && searchResults.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -252,7 +357,7 @@ fun SearchScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (searchQuery.isEmpty() && genreFilter == null && yearFilter == null && countryFilter == null) {
-                    item {
+                    item(key = "search_mood_grid_${selectedCountry.code}") {
                         Text(
                             text = tr(
                                 lang,
@@ -288,7 +393,7 @@ fun SearchScreen(
                     }
 
                     // Top Artists Direct Access
-                    item {
+                    item(key = "search_top_artists_header") {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = tr(
@@ -303,7 +408,10 @@ fun SearchScreen(
                         )
                     }
 
-                    items(selectedCountry.topArtists) { artist ->
+                    items(
+                        items = selectedCountry.topArtists,
+                        key = { "artist_$it" }
+                    ) { artist ->
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -341,7 +449,10 @@ fun SearchScreen(
                         }
                     }
                 } else {
-                    items(searchResults) { track ->
+                    items(
+                        items = searchResults,
+                        key = { track -> "search_result_${track.id}" }
+                    ) { track ->
                         TrackItemCard(
                             track = track,
                             isPlaying = isPlaying && currentTrack?.id == track.id,

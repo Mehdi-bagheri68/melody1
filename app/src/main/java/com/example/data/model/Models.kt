@@ -17,10 +17,13 @@ data class Track(
     val releaseYear: String,
     val countryCode: String,
     val isFavorite: Boolean = false,
-    val playCount: Int = 1000
+    val playCount: Int = 1000,
+    val sourceId: String = "curated"
 ) {
+    // Fixes BUG-05 & UI-08: Return "--:--" when durationMs <= 0 (unknown duration until Player prepares)
     val durationFormatted: String
         get() {
+            if (durationMs <= 0L) return "--:--"
             val totalSeconds = durationMs / 1000
             val minutes = totalSeconds / 60
             val seconds = totalSeconds % 60
@@ -31,6 +34,37 @@ data class Track(
         get() = artworkUrl
             .replace("100x100bb", "600x600bb")
             .replace("60x60bb", "600x600bb")
+
+    val hasBundledArtwork: Boolean
+        get() = artworkUrl.startsWith("file:///android_asset/covers/")
+}
+
+/**
+ * Structured error categorization for playback & network failures (Fixes BUG-01, BUG-02, BUG-13).
+ */
+enum class ErrorCategory {
+    SOURCE_UNAVAILABLE, // Empty or invalid URL -> non-recoverable, never substitute a different song
+    SOURCE_NOT_FOUND,   // HTTP 401, 403, 404, 410 -> non-recoverable
+    RATE_LIMITED,       // HTTP 429 -> backoff with Retry-After
+    NETWORK_TRANSIENT,  // Timeout, DNS, Connection drop, 5xx -> exponential backoff up to maxAttempts
+    DECODER_FORMAT,     // Media decoder / container format error -> non-recoverable
+    UNKNOWN
+}
+
+data class PlaybackError(
+    val code: String,
+    val category: ErrorCategory,
+    val httpStatusCode: Int? = null,
+    val sourceUrl: String = "",
+    val recoverable: Boolean,
+    val attemptCount: Int = 0,
+    val maxAttempts: Int = 6,
+    val userMessageFa: String,
+    val userMessageEn: String,
+    val timestampMs: Long = System.currentTimeMillis()
+) {
+    fun getMessage(lang: AppLanguage): String =
+        if (lang == AppLanguage.FA) userMessageFa else userMessageEn
 }
 
 data class Country(
@@ -83,6 +117,7 @@ enum class AudioQuality(
     val titleFa: String,
     val titleEn: String,
     val bitrate: String,
+    val maxBitrateBps: Int,
     val descriptionFa: String,
     val descriptionEn: String
 ) {
@@ -90,22 +125,25 @@ enum class AudioQuality(
         "کیفیت بالا",
         "High Quality",
         "320 kbps",
-        "بهترین وضوح صدا با بالاترین پهنای باند",
-        "Best audio clarity with highest bandwidth"
+        320_000,
+        "پخش استریم ۳۲۰ کیلوبیت در صورت پشتیبانی منبع",
+        "Streams 320 kbps source variant when available"
     ),
     STANDARD(
         "استاندارد",
         "Standard",
         "192 kbps",
-        "تعادل مناسب بین کیفیت و مصرف دیتا",
-        "Balanced audio quality and data usage"
+        192_000,
+        "تعادل بین کیفیت صدا و مصرف اینترنت",
+        "Balanced audio quality and data consumption"
     ),
     DATA_SAVER(
         "کاهش مصرف دیتا",
         "Data Saver",
-        "96 kbps",
-        "بهینه‌سازی حداکثری برای اتصال ضعیف اینترنت",
-        "Optimized for slow network connections"
+        "128 kbps",
+        128_000,
+        "انتخاب خودکار نسخه کم‌حجم ۱۲۸ کیلوبیت برای اینترنت ضعیف",
+        "Selects 128 kbps lightweight stream for slow networks"
     );
 
     fun getTitle(lang: AppLanguage): String =

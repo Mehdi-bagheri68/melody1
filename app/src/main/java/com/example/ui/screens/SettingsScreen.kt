@@ -28,17 +28,21 @@ import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -66,7 +70,10 @@ fun SettingsScreen(
     appLanguage: AppLanguage,
     onCountryChangeClick: () -> Unit,
     onAudioQualityChanged: (AudioQuality) -> Unit,
-    onLanguageChanged: (AppLanguage) -> Unit
+    onLanguageChanged: (AppLanguage) -> Unit,
+    iranNoVpnMode: Boolean = true,
+    onIranNoVpnModeChanged: (Boolean) -> Unit = {},
+    onClearCacheClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lang = LocalAppLanguage.current
@@ -90,8 +97,8 @@ fun SettingsScreen(
             Text(
                 text = tr(
                     lang,
-                    "تغییر زبان (فارسی راست‌به‌چپ / انگلیسی چپ‌به‌راست)، کشور و کیفیت پخش",
-                    "Customize language (Persian RTL / English LTR), region, and audio quality"
+                    "تغییر زبان (فارسی راست‌به‌چپ / انگلیسی چپ‌به‌راست)، کشور، حالت شبکه و کیفیت پخش",
+                    "Customize language (Persian RTL / English LTR), region, network mode, and audio quality"
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
@@ -180,6 +187,84 @@ fun SettingsScreen(
             }
         }
 
+        // Section: Iran No-VPN Direct Streaming Mode (BUG-10)
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Public,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = tr(lang, "حالت شبکه و پخش بدون فیلترشکن (No-VPN)", "Iran No-VPN Direct Streaming Mode"),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = AccentGold,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = OledSurface)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tr(
+                                lang,
+                                "اتصال مستقیم به سرورهای داخل کشور (بدون نیاز به VPN)",
+                                "Direct Domestic CDN (No VPN Required)"
+                            ),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = tr(
+                                lang,
+                                if (iranNoVpnMode) {
+                                    "فعال: فقط از سرورهای مستقیم و بدون فیلتر پخش کامل آهنگ انجام می‌شود و از سرورهای مسدود بین‌المللی استفاده نمی‌شود."
+                                } else {
+                                    "غیرفعال: در کنار سرورهای مستقیم، جستجو از سرورهای بین‌المللی (نیازمند اینترنت آزاد/VPN برای پیش‌نمایش) نیز فعال است."
+                                },
+                                if (iranNoVpnMode) {
+                                    "Enabled: Uses only direct unfiltered full-track servers and skips blocked international hosts."
+                                } else {
+                                    "Disabled: Also queries international iTunes servers alongside direct full-track hosts."
+                                }
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            lineHeight = 18.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = iranNoVpnMode,
+                        onCheckedChange = onIranNoVpnModeChanged,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = AccentGold
+                        ),
+                        modifier = Modifier.testTag("iran_no_vpn_switch")
+                    )
+                }
+            }
+        }
+
         // Section: Country Preference
         item {
             Text(
@@ -239,13 +324,23 @@ fun SettingsScreen(
             }
         }
 
-        // Section: Audio Quality Selector
+        // Section: Audio Quality Selector (BUG-09 / UI-10)
         item {
             Text(
                 text = tr(lang, "کیفیت پخش و مصرف دیتا", "Streaming Quality & Data Usage"),
                 style = MaterialTheme.typography.titleMedium,
                 color = AccentGold,
                 fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = tr(
+                    lang,
+                    "در صورت پشتیبانی سرور از نسخه‌های 320kbps و 128kbps، کیفیت استریم به صورت هوشمند سوییچ می‌شود",
+                    "Automatically switches between 320kbps and 128kbps stream variants when available on the host"
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
             )
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -415,13 +510,15 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .clickable {
+                                onClearCacheClick()
                                 val msg = if (lang == AppLanguage.FA) {
-                                    "حافظه کش موقت با موفقیت پاکسازی شد"
+                                    "حافظه کش موقت و سلامت سرورها بازنشانی شد"
                                 } else {
-                                    "Temporary cache cleared successfully"
+                                    "Temporary cache and host health reset successfully"
                                 }
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            },
+                            }
+                            .testTag("clear_temp_cache_btn"),
                         color = OledSurfaceHigh
                     ) {
                         Row(
@@ -442,10 +539,10 @@ fun SettingsScreen(
             }
         }
 
-        // Section: Complete Version History Documentation (v1.0.0 -> v1.4.0)
+        // Section: Complete Version History Documentation (v1.0.0 -> v1.5.0)
         item {
             Text(
-                text = tr(lang, "مستندات تاریخچه نسخه‌ها (VERSION_HISTORY.md)", "Version History & Changelog (v1.0.0 – v1.4.0)"),
+                text = tr(lang, "مستندات تاریخچه نسخه‌ها (VERSION_HISTORY.md)", "Version History & Changelog (v1.0.0 – v1.5.0)"),
                 style = MaterialTheme.typography.titleMedium,
                 color = AccentGold,
                 fontWeight = FontWeight.Bold
@@ -465,9 +562,14 @@ fun SettingsScreen(
                 ) {
                     listOf(
                         Triple(
-                            "v1.4.0 (Build 4) — نسخه فعلی",
-                            "• تفکیک کامل آهنگ‌ها و دسته‌بندی‌ها (Moods) بر اساس کشور انتخابی (ایران، ترکیه، آمریکا، بریتانیا، اسپانیا، فرانسه، آلمان)\n• رفع کامل قطع شدن پخش پس از ۱ دقیقه در پس‌زمینه و قفل صفحه با Foreground MediaSessionService و قفل سخت‌افزاری WakeLock / WifiLock\n• فعال‌سازی کامل دکمه‌های جلو/عقب بردن (Seek)، آهنگ بعدی و قبلی در نوار اعلان (Notification) و صفحه قفل (Lock Screen)\n• سیستم تلاش مجدد پیوسته خودکار (Continuous Auto-Retry) در زمان اختلال اینترنت و ادامه خودکار پخش از همان ثانیه قبلی\n• ضمیمه شدن فایل مستندات کامل تاریخچه نسخه‌ها (VERSION_HISTORY.md و CHANGELOG.md) در مسیر فایل‌های پروژه",
-                            "Country-specific catalogs & categories, uninterrupted lock-screen/background playback, full Notification & Lock Screen Seek/Next/Prev controls, continuous network auto-retry with exact position resume, and full version history documentation."
+                            "v1.5.0 (Build 5) — نسخه فعلی",
+                            "• رفع کامل ۱۴ باگ فنی (BUG-01 تا BUG-14) و ۱۴ مورد UI/UX (UI-01 تا UI-14)\n• حذف کامل جایگزینی پنهان آهنگ نامعتبر با آهنگ پیش‌فرض دیگر و پیاده‌سازی SourceResolver اختصاصی\n• طبقه‌بندی هوشمند خطاهای شبکه و استریم (404/403/Timeout/429) با سقف تلاش مجدد (حداکثر ۶ بار Exponential Backoff) و دکمه تلاش مجدد دستی\n• اعتبارسنجی دقیق MediaItem پیش از Seek، جداسازی پارسر HTML با تشخیص ضدربات و نمایش واقعی زمان آهنگ (--:-- تا آماده شدن ExoPlayer)\n• همگام‌سازی Thread-Safe کش جستجو با کلید نرمال‌شده، لغو Jobهای قبلی при تغییر سریع کشور/مود، سوییچ واقعی کیفیت 320/128kbps و مستندات کامل رفع باگ‌ها",
+                            "Resolved all 14 technical bugs (BUG-01..14) and 14 UI/UX audit items (UI-01..14): removed silent song substitution, added error classification & bounded exponential backoff (max 6 retries) + manual retry, strict MediaItem seek verification, isolated MusicsFaHtmlParser with CAPTCHA detection, dynamic duration (--:-- until ready), Mutex-synchronized TTL cache, coroutine Job cancellation on rapid switches, and real 320/128kbps bitrate variant switching."
+                        ),
+                        Triple(
+                            "v1.4.0 (Build 4)",
+                            "• تفکیک کامل آهنگ‌ها و دسته‌بندی‌ها (Moods) بر اساس کشور انتخابی (ایران، ترکیه، آمریکا، بریتانیا، اسپانیا، فرانسه، آلمان)\n• رفع کامل قطع شدن پخش پس از ۱ دقیقه در پس‌زمینه و قفل صفحه با Foreground MediaSessionService و قفل سخت‌افزاری WakeLock / WifiLock\n• فعال‌سازی کامل دکمه‌های جلو/عقب بردن (Seek)، آهنگ بعدی و قبلی در نوار اعلان (Notification) و صفحه قفل (Lock Screen)",
+                            "Country-specific catalogs & categories, uninterrupted lock-screen/background playback, and full Notification & Lock Screen Seek/Next/Prev controls."
                         ),
                         Triple(
                             "v1.3.0 (Build 3)",

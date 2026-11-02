@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,14 +35,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -62,6 +61,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -73,15 +73,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -91,6 +88,7 @@ import coil.compose.AsyncImage
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
 import com.example.data.model.MoodCategory
+import com.example.data.model.PlaybackError
 import com.example.data.model.Playlist
 import com.example.data.model.Track
 import com.example.ui.AppStrings.tr
@@ -105,12 +103,13 @@ import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
-import kotlin.math.abs
+import com.example.util.BidiHelper
 
 /**
- * Guaranteed Real Photographic Album Cover Artwork!
- * Loads bundled real album cover photos (file:///android_asset/covers/...) in 0ms without VPN,
- * or streams real cover JPGs from unfiltered Iranian music servers with automatic real-photo fallback.
+ * Fixes BUG-01 & UI-14:
+ * - Loads authentic album covers from `file:///android_asset/covers/...` or valid remote URLs.
+ * - If a track has no cover or its remote image fails to load, displays a neutral stylized
+ *   vinyl/music placeholder (`NeutralArtworkPlaceholder`) instead of substituting another album's photo!
  */
 @Composable
 fun TrackArtwork(
@@ -121,46 +120,47 @@ fun TrackArtwork(
     modifier: Modifier = Modifier,
     showTextOverlay: Boolean = true
 ) {
-    val bundledCoverIds = remember {
-        listOf(
-            1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 1021,
-            1023, 1024, 1025, 1026, 1027, 1001, 1002, 1003, 1004,
-            1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012
-        )
-    }
-    val fallbackCoverAsset = remember(seedId) {
-        val chosen = bundledCoverIds[abs(seedId.toInt()) % bundledCoverIds.size]
-        "file:///android_asset/covers/cover_$chosen.jpg"
-    }
-
-    val initialUrl = remember(imageUrl, fallbackCoverAsset) {
-        if (imageUrl.isBlank() ||
+    val isInvalidPlaceholderUrl = remember(imageUrl) {
+        imageUrl.isBlank() ||
             imageUrl.contains("picsum.photos", ignoreCase = true) ||
             imageUrl.contains("unsplash.com", ignoreCase = true)
-        ) {
-            fallbackCoverAsset
-        } else {
-            imageUrl
-        }
     }
 
-    var currentModel by remember(initialUrl) { mutableStateOf(initialUrl) }
+    var loadFailed by remember(imageUrl) { mutableStateOf(false) }
 
     Box(
-        modifier = modifier.background(OledSurfaceVariant),
+        modifier = modifier.background(
+            Brush.linearGradient(
+                colors = listOf(OledSurfaceVariant, OledSurfaceHigh)
+            )
+        ),
         contentAlignment = Alignment.Center
     ) {
-        AsyncImage(
-            model = currentModel,
-            contentDescription = title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            onError = {
-                if (currentModel != fallbackCoverAsset) {
-                    currentModel = fallbackCoverAsset
-                }
+        if (isInvalidPlaceholderUrl || loadFailed) {
+            // Neutral stylized vinyl placeholder (never impersonates another artist's cover!)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Album,
+                    contentDescription = title,
+                    tint = AccentGold.copy(alpha = 0.75f),
+                    modifier = Modifier.size(28.dp)
+                )
             }
-        )
+        } else {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                onError = {
+                    loadFailed = true
+                }
+            )
+        }
     }
 }
 
@@ -179,9 +179,10 @@ fun ModernMoodCard(
         )
     )
 
+    // Fixes UI-01 & UI-13: Adaptive minimum height so large font scales (1.3x-1.5x) never clip text
     Box(
         modifier = modifier
-            .height(92.dp)
+            .heightIn(min = 96.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(brush)
             .border(
@@ -199,7 +200,7 @@ fun ModernMoodCard(
             subtitle = "",
             showTextOverlay = false,
             modifier = Modifier
-                .size(72.dp)
+                .size(68.dp)
                 .align(Alignment.BottomEnd)
                 .offset(x = if (lang.isRtl) (-10).dp else 10.dp, y = 8.dp)
                 .rotate(if (lang.isRtl) -14f else 14f)
@@ -209,7 +210,7 @@ fun ModernMoodCard(
 
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
                 .padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -227,8 +228,10 @@ fun ModernMoodCard(
                     )
                 }
             } else {
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             Column {
                 Text(
@@ -236,14 +239,15 @@ fun ModernMoodCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                     fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = mood.getSecondaryTitle(lang),
+                    text = BidiHelper.formatMixed(lang.isRtl, mood.getSecondaryTitle(lang)),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.8f),
-                    maxLines = 1
+                    color = Color.White.copy(alpha = 0.85f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -263,6 +267,7 @@ fun HorizontalShelfTrackCard(
     onArtistClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val lang = LocalAppLanguage.current
     val borderColor = if (isCurrentTrack) AccentGold else BorderSubtle
 
     Card(
@@ -314,14 +319,18 @@ fun HorizontalShelfTrackCard(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(6.dp)
-                        .size(34.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(AccentGold),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (isCurrentTrack && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Play",
+                        contentDescription = if (isCurrentTrack && isPlaying) {
+                            tr(lang, "مکث ${track.title}", "Pause ${track.title}")
+                        } else {
+                            tr(lang, "پخش ${track.title}", "Play ${track.title}")
+                        },
                         tint = Color.Black,
                         modifier = Modifier.size(20.dp)
                     )
@@ -331,7 +340,7 @@ fun HorizontalShelfTrackCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = track.title,
+                text = BidiHelper.formatMixed(lang.isRtl, track.title),
                 style = MaterialTheme.typography.titleSmall,
                 color = if (isCurrentTrack) AccentGold else TextPrimary,
                 fontWeight = FontWeight.Bold,
@@ -342,20 +351,22 @@ fun HorizontalShelfTrackCard(
             Spacer(modifier = Modifier.height(2.dp))
 
             Text(
-                text = track.artist,
+                text = BidiHelper.formatMixed(lang.isRtl, track.artist),
                 style = MaterialTheme.typography.bodySmall.copy(
                     textDecoration = TextDecoration.Underline
                 ),
                 color = AccentGold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable { onArtistClick(track.artist) }
+                modifier = Modifier
+                    .clickable { onArtistClick(track.artist) }
+                    .padding(vertical = 2.dp)
             )
 
             Spacer(modifier = Modifier.height(2.dp))
 
             Text(
-                text = "${track.releaseYear} • ${track.durationFormatted}",
+                text = "${BidiHelper.isolateLtr(track.releaseYear)} • ${BidiHelper.isolateLtr(track.durationFormatted)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextTertiary,
                 maxLines = 1
@@ -437,7 +448,7 @@ fun TrackItemCard(
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.Pause,
-                                    contentDescription = "Playing",
+                                    contentDescription = tr(lang, "در حال پخش", "Playing"),
                                     tint = AccentGold,
                                     modifier = Modifier.size(24.dp)
                                 )
@@ -454,7 +465,7 @@ fun TrackItemCard(
                         .padding(end = 4.dp)
                 ) {
                     Text(
-                        text = track.title,
+                        text = BidiHelper.formatMixed(lang.isRtl, track.title),
                         style = MaterialTheme.typography.titleMedium,
                         color = if (isCurrentTrack) AccentGold else TextPrimary,
                         maxLines = 1,
@@ -480,7 +491,7 @@ fun TrackItemCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = track.artist,
+                            text = BidiHelper.formatMixed(lang.isRtl, track.artist),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 textDecoration = if (onArtistClick != null) TextDecoration.Underline else TextDecoration.None
                             ),
@@ -502,14 +513,16 @@ fun TrackItemCard(
                             )
                         }
                         Text(
-                            text = "${track.genre} • ${track.releaseYear} • ${track.durationFormatted}",
+                            text = "${track.genre} • ${BidiHelper.isolateLtr(track.releaseYear)} • ${BidiHelper.isolateLtr(track.durationFormatted)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextTertiary,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
+                // Fixes UI-12: Minimum 48dp accessible touch targets & localized contentDescriptions
                 if (trailingContent != null) {
                     trailingContent()
                 } else {
@@ -517,7 +530,7 @@ fun TrackItemCard(
                         IconButton(
                             onClick = onStopTrackClick,
                             modifier = Modifier
-                                .size(40.dp)
+                                .minimumInteractiveComponentSize()
                                 .testTag("stop_track_btn_${track.id}")
                         ) {
                             Icon(
@@ -532,12 +545,16 @@ fun TrackItemCard(
                     IconButton(
                         onClick = onToggleFavorite,
                         modifier = Modifier
-                            .size(40.dp)
+                            .minimumInteractiveComponentSize()
                             .testTag("fav_btn_${track.id}")
                     ) {
                         Icon(
                             imageVector = if (track.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Favorite",
+                            contentDescription = if (track.isFavorite) {
+                                tr(lang, "حذف از علاقه‌مندی‌ها", "Remove from Favorites")
+                            } else {
+                                tr(lang, "افزودن به علاقه‌مندی‌ها", "Add to Favorites")
+                            },
                             tint = if (track.isFavorite) AccentOrange else TextTertiary,
                             modifier = Modifier.size(20.dp)
                         )
@@ -547,12 +564,12 @@ fun TrackItemCard(
                         IconButton(
                             onClick = { showMenu = true },
                             modifier = Modifier
-                                .size(40.dp)
+                                .minimumInteractiveComponentSize()
                                 .testTag("menu_btn_${track.id}")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
-                                contentDescription = "More",
+                                contentDescription = tr(lang, "گزینه‌های بیشتر", "More Options"),
                                 tint = TextSecondary,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -691,6 +708,12 @@ fun MiniPulsingVisualizer() {
     }
 }
 
+/**
+ * Fixes UI-07 & UI-12:
+ * - Shows clean, human-readable status ("در حال اتصال مجدد…" or "منبع در دسترس نیست") instead of raw numbers.
+ * - Provides a manual Retry button when a playback error occurs.
+ * - Uses 48.dp minimum touch targets and localized contentDescriptions.
+ */
 @Composable
 fun MiniPlayer(
     currentTrack: Track?,
@@ -705,6 +728,8 @@ fun MiniPlayer(
     onExpandClick: () -> Unit,
     isRetrying: Boolean = false,
     retryCount: Int = 0,
+    playbackError: PlaybackError? = null,
+    onManualRetry: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (currentTrack == null) return
@@ -719,7 +744,7 @@ fun MiniPlayer(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(18.dp))
-            .border(1.dp, BorderHighlight, RoundedCornerShape(18.dp))
+            .border(1.dp, if (playbackError != null && !isRetrying) AccentOrange else BorderHighlight, RoundedCornerShape(18.dp))
             .clickable(onClick = onExpandClick)
             .testTag("mini_player"),
         color = OledSurfaceVariant,
@@ -731,14 +756,14 @@ fun MiniPlayer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(3.dp),
-                color = AccentGold,
+                color = if (playbackError != null && !isRetrying) AccentOrange else AccentGold,
                 trackColor = Color(0x33FFB800)
             )
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -763,58 +788,87 @@ fun MiniPlayer(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = currentTrack.title,
+                        text = BidiHelper.formatMixed(lang.isRtl, currentTrack.title),
                         style = MaterialTheme.typography.titleSmall,
                         color = TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (isRetrying) {
-                        Text(
-                            text = tr(
-                                lang,
-                                "تلاش مجدد خودکار اتصال (${retryCount})...",
-                                "Auto-retrying stream (${retryCount})..."
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AccentOrange,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else {
-                        Text(
-                            text = currentTrack.artist,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                textDecoration = TextDecoration.Underline
-                            ),
-                            color = AccentGold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable {
-                                onArtistClick(currentTrack.artist)
-                            }
-                        )
+                    when {
+                        isRetrying -> {
+                            Text(
+                                text = tr(lang, "در حال اتصال مجدد…", "Reconnecting…"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AccentOrange,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        playbackError != null -> {
+                            Text(
+                                text = playbackError.getMessage(lang),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AccentOrange,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        else -> {
+                            Text(
+                                text = BidiHelper.formatMixed(lang.isRtl, currentTrack.artist),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    textDecoration = TextDecoration.Underline
+                                ),
+                                color = AccentGold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.clickable {
+                                    onArtistClick(currentTrack.artist)
+                                }
+                            )
+                        }
                     }
                 }
 
-                if (isBuffering) {
-                    CircularProgressIndicator(
+                if (playbackError != null && !isRetrying) {
+                    IconButton(
+                        onClick = onManualRetry,
                         modifier = Modifier
-                            .size(28.dp)
-                            .padding(4.dp),
-                        color = AccentGold,
-                        strokeWidth = 2.dp
-                    )
+                            .minimumInteractiveComponentSize()
+                            .testTag("mini_player_retry")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = tr(lang, "تلاش مجدد", "Retry"),
+                            tint = AccentGold,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                } else if (isBuffering) {
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = AccentGold,
+                            strokeWidth = 2.dp
+                        )
+                    }
                 } else {
                     IconButton(
                         onClick = onPlayPauseToggle,
                         modifier = Modifier
-                            .size(40.dp)
+                            .minimumInteractiveComponentSize()
                             .testTag("mini_player_play_pause")
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            contentDescription = if (isPlaying) {
+                                tr(lang, "مکث پخش", "Pause")
+                            } else {
+                                tr(lang, "شروع پخش", "Play")
+                            },
                             tint = AccentGold,
                             modifier = Modifier.size(26.dp)
                         )
@@ -824,12 +878,12 @@ fun MiniPlayer(
                 IconButton(
                     onClick = onSkipNext,
                     modifier = Modifier
-                        .size(38.dp)
+                        .minimumInteractiveComponentSize()
                         .testTag("mini_player_next")
                 ) {
                     Icon(
                         imageVector = Icons.Default.SkipNext,
-                        contentDescription = "Next",
+                        contentDescription = tr(lang, "آهنگ بعدی", "Next Track"),
                         tint = TextPrimary,
                         modifier = Modifier.size(22.dp)
                     )
@@ -838,12 +892,12 @@ fun MiniPlayer(
                 IconButton(
                     onClick = onStopAndDismiss,
                     modifier = Modifier
-                        .size(38.dp)
+                        .minimumInteractiveComponentSize()
                         .testTag("mini_player_stop_close")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Stop",
+                        contentDescription = tr(lang, "توقف و بستن پلیر", "Stop and Close Player"),
                         tint = AccentOrange,
                         modifier = Modifier.size(20.dp)
                     )
@@ -868,7 +922,7 @@ fun SectionHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
@@ -936,7 +990,7 @@ fun CountryPickerDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(CountriesData.allCountries) { country ->
+                    items(CountriesData.allCountries, key = { it.code }) { country ->
                         val isSelected = country.code == selectedCountry.code
                         val isIran = country.code == "IR"
 
@@ -996,7 +1050,7 @@ fun CountryPickerDialog(
                                 if (isSelected) {
                                     Icon(
                                         imageVector = Icons.Default.Check,
-                                        contentDescription = "Selected",
+                                        contentDescription = tr(lang, "انتخاب شده", "Selected"),
                                         tint = AccentGold
                                     )
                                 }
@@ -1163,7 +1217,7 @@ fun AddToPlaylistDialog(
                             modifier = Modifier.height(180.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            items(playlists) { pl ->
+                            items(playlists, key = { it.id }) { pl ->
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()

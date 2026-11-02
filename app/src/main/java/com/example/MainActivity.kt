@@ -123,9 +123,11 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val selectedCountry by viewModel.selectedCountry.collectAsState()
     val appLanguage by viewModel.appLanguage.collectAsState()
+    val iranNoVpnMode by viewModel.iranNoVpnMode.collectAsState()
     val trendingTracks by viewModel.trendingTracks.collectAsState()
     val newReleaseTracks by viewModel.newReleaseTracks.collectAsState()
     val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
+    val trendingErrorMessage by viewModel.trendingErrorMessage.collectAsState()
     val recentHistory by viewModel.listeningHistory.collectAsState()
     val activeMood by viewModel.activeMood.collectAsState()
     val moodTracks by viewModel.moodTracks.collectAsState()
@@ -152,6 +154,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val isBuffering by viewModel.isBuffering.collectAsState()
     val isRetrying by viewModel.isRetrying.collectAsState()
     val retryCount by viewModel.retryCount.collectAsState()
+    val playbackError by viewModel.playbackError.collectAsState()
+    val hasQualityVariant by viewModel.hasQualityVariant.collectAsState()
+    val effectiveBitrateLabel by viewModel.effectiveBitrateLabel.collectAsState()
     val currentPositionMs by viewModel.currentPositionMs.collectAsState()
     val durationMs by viewModel.durationMs.collectAsState()
     val playbackMode by viewModel.playbackMode.collectAsState()
@@ -208,7 +213,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                     onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
                                     onExpandClick = { viewModel.setFullPlayerExpanded(true) },
                                     isRetrying = isRetrying,
-                                    retryCount = retryCount
+                                    retryCount = retryCount,
+                                    playbackError = playbackError,
+                                    onManualRetry = { viewModel.retryPlaybackManually() }
                                 )
                             }
 
@@ -306,7 +313,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                 onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
                                 onStopTrackClick = { viewModel.stopAndClearPlayback() },
                                 onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) }
+                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
+                                trendingErrorMessage = trendingErrorMessage,
+                                onRetryTrending = { viewModel.loadTrendingForCountry(selectedCountry) }
                             )
                         }
 
@@ -333,7 +342,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                 onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
                                 onStopTrackClick = { viewModel.stopAndClearPlayback() },
                                 onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) }
+                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
+                                onSubmitSearch = { viewModel.submitSearchNow() },
+                                onClearAllFilters = { viewModel.clearAllSearchFilters() }
                             )
                         }
 
@@ -415,7 +426,10 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                 appLanguage = appLanguage,
                                 onCountryChangeClick = { viewModel.setCountryPickerVisible(true) },
                                 onAudioQualityChanged = { quality -> viewModel.setAudioQuality(quality) },
-                                onLanguageChanged = { lang -> viewModel.setAppLanguage(lang) }
+                                onLanguageChanged = { lang -> viewModel.setAppLanguage(lang) },
+                                iranNoVpnMode = iranNoVpnMode,
+                                onIranNoVpnModeChanged = { enabled -> viewModel.setIranNoVpnMode(enabled) },
+                                onClearCacheClick = { viewModel.clearTemporaryCache() }
                             )
                         }
 
@@ -452,7 +466,12 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                         com.example.data.model.AudioQuality.DATA_SAVER -> com.example.data.model.AudioQuality.HIGH
                     }
                     viewModel.setAudioQuality(next)
-                }
+                },
+                isRetrying = isRetrying,
+                playbackError = playbackError,
+                onManualRetry = { viewModel.retryPlaybackManually() },
+                hasQualityVariant = hasQualityVariant,
+                effectiveBitrateLabel = effectiveBitrateLabel
             )
         }
 

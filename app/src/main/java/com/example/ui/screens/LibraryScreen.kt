@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -39,10 +40,14 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +66,7 @@ import com.example.ui.theme.AccentOrange
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.OledBackground
 import com.example.ui.theme.OledSurface
+import com.example.ui.theme.OledSurfaceHigh
 import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -83,12 +89,60 @@ fun LibraryScreen(
     onClearHistory: () -> Unit
 ) {
     val lang = LocalAppLanguage.current
-    var selectedTab by remember { mutableIntStateOf(0) }
+    // UI-05: Preserve selectedTab across navigation and orientation changes
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
+
     val tabs = listOf(
-        tr(lang, "علاقه‌مندی‌ها", "Liked Songs"),
-        tr(lang, "پلی‌لیست‌ها", "Playlists"),
-        tr(lang, "تاریخچه گوش دادن", "Listening History")
+        tr(lang, "علاقه‌مندی‌ها (${favorites.size})", "Liked (${favorites.size})"),
+        tr(lang, "پلی‌لیست‌ها (${playlists.size})", "Playlists (${playlists.size})"),
+        tr(lang, "تاریخچه (${listeningHistory.size})", "History (${listeningHistory.size})")
     )
+
+    // UI-06: Confirmation Dialog before clearing listening history
+    if (showClearHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryDialog = false },
+            containerColor = OledSurfaceHigh,
+            title = {
+                Text(
+                    text = tr(lang, "پاکسازی تاریخچه پخش", "Clear Listening History"),
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = tr(
+                        lang,
+                        "آیا مطمئن هستید که می‌خواهید تمام ${listeningHistory.size} آهنگ موجود در تاریخچه پخش را حذف کنید؟",
+                        "Are you sure you want to delete all ${listeningHistory.size} tracks from your listening history?"
+                    ),
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearHistoryDialog = false
+                        onClearHistory()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentOrange,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.testTag("confirm_clear_history_btn")
+                ) {
+                    Text(tr(lang, "حذف تاریخچه", "Delete All"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHistoryDialog = false }) {
+                    Text(tr(lang, "انصراف", "Cancel"), color = TextSecondary)
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -126,8 +180,10 @@ fun LibraryScreen(
                 }
             } else if (selectedTab == 2 && listeningHistory.isNotEmpty()) {
                 IconButton(
-                    onClick = onClearHistory,
-                    modifier = Modifier.testTag("clear_history_btn")
+                    onClick = { showClearHistoryDialog = true },
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("clear_history_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.DeleteSweep,
@@ -246,7 +302,7 @@ private fun FavoritesTabContent(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            item {
+            item(key = "fav_header") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -272,7 +328,10 @@ private fun FavoritesTabContent(
                 }
             }
 
-            items(favorites) { track ->
+            items(
+                items = favorites,
+                key = { track -> "fav_${track.id}" }
+            ) { track ->
                 TrackItemCard(
                     track = track,
                     isPlaying = isPlaying && currentTrack?.id == track.id,
@@ -344,7 +403,10 @@ private fun PlaylistsTabContent(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(playlists) { pl ->
+            items(
+                items = playlists,
+                key = { pl -> "playlist_${pl.id}" }
+            ) { pl ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -455,7 +517,10 @@ private fun HistoryTabContent(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(listeningHistory) { track ->
+            items(
+                items = listeningHistory,
+                key = { track -> "history_${track.id}" }
+            ) { track ->
                 TrackItemCard(
                     track = track,
                     isPlaying = isPlaying && currentTrack?.id == track.id,

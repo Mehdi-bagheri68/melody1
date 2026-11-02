@@ -14,10 +14,13 @@ import com.example.data.model.CountriesData
 import com.example.data.model.Country
 import com.example.data.model.Playlist
 import com.example.data.model.Track
+import com.example.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,7 +33,14 @@ class MusicRepository(
     private val itunesApi: ItunesApiService = ApiClient.itunesApi,
     private val archiveApi: ArchiveApiService = ArchiveApiClient.service
 ) {
-    private val searchCache = mutableMapOf<String, List<Track>>()
+    private data class CacheEntry(
+        val tracks: List<Track>,
+        val createdAtMs: Long
+    )
+
+    // Fixes BUG-06: Thread-safe Mutex-synchronized cache with TTL expiration & capacity bound
+    private val cacheMutex = Mutex()
+    private val searchCache = LinkedHashMap<String, CacheEntry>(MAX_CACHE_ENTRIES, 0.75f, true)
 
     private val scraperClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -55,17 +65,61 @@ class MusicRepository(
             .sortedByDescending { it.releaseYear.toIntOrNull() ?: 2026 }
     }
 
+    suspend fun clearSearchCache() {
+        cacheMutex.withLock {
+            searchCache.clear()
+        }
+    }
+
+    private fun normalizeCacheKey(
+        term: String,
+        countryCode: String?,
+        genreFilter: String?,
+        yearFilter: String?,
+        iranNoVpnMode: Boolean
+    ): String {
+        return listOf(
+            term.trim().lowercase(),
+            (countryCode ?: "").trim().uppercase(),
+            (genreFilter ?: "").trim().lowercase(),
+            (yearFilter ?: "").trim(),
+            if (iranNoVpnMode) "novpn" else "global"
+        ).joinToString("|")
+    }
+
     suspend fun searchTracks(
         term: String,
         countryCode: String? = null,
         genreFilter: String? = null,
-        yearFilter: String? = null
+        yearFilter: String? = null,
+        iranNoVpnMode: Boolean = true
     ): List<Track> = withContext(Dispatchers.IO) {
-        val cacheKey = "$term-$countryCode-$genreFilter-$yearFilter"
-        searchCache[cacheKey]?.let { return@withContext it }
+        val favoriteIds = try {
+            musicDao.getAllFavoriteIds().first().toSet()
+        } catch (e: Exception) {
+            AppLogger.w("searchTracks:favorites", "Failed to read favorite IDs", e)
+            emptySet()
+        }
 
-        val favoriteIds = musicDao.getAllFavoriteIds().first().toSet()
+        val cacheKey = normalizeCacheKey(term, countryCode, genreFilter, yearFilter, iranNoVpnMode)
+        val now = System.currentTimeMillis()
+
+        // Check TTL cache and dynamically merge current favorite states from Room (Fixes BUG-06)
+        cacheMutex.withLock {
+            val cached = searchCache[cacheKey]
+            if (cached != null) {
+                if (now - cached.createdAtMs <= CACHE_TTL_MS) {
+                    return@withContext cached.tracks.map { track ->
+                        track.copy(isFavorite = favoriteIds.contains(track.id))
+                    }
+                } else {
+                    searchCache.remove(cacheKey)
+                }
+            }
+        }
+
         val fullTracks = mutableListOf<Track>()
+        var encounteredNetworkError = false
 
         val basePool = if (!countryCode.isNullOrBlank() && term.isBlank()) {
             getCuratedTracksForCountry(CountriesData.getCountryByCode(countryCode), favoriteIds)
@@ -85,17 +139,65 @@ class MusicRepository(
         }
         fullTracks.addAll(curatedMatches)
 
-        // Live search on unfiltered Iranian music server (musics-fa.com) for any query
-        if (term.isNotBlank()) {
-            val liveTracks = fetchLiveFromMusicsFa(
+        // Live search on unfiltered Iranian music server (musics-fa.com) when healthy
+        if (term.isNotBlank() && SourceResolver.isHostHealthy("musics-fa.com")) {
+            val liveResult = fetchLiveFromMusicsFa(
                 query = term,
                 favoriteIds = favoriteIds,
                 countryCode = countryCode ?: "IR"
             )
-            fullTracks.addAll(liveTracks)
+            if (liveResult.hadNetworkFailure) {
+                encounteredNetworkError = true
+            }
+            fullTracks.addAll(liveResult.tracks)
         }
 
-        var results = fullTracks.distinctBy { "${it.id}_${it.previewUrl}" }
+        // Fixes BUG-10: When Iran No-VPN Mode is OFF, also query international iTunes catalog
+        if (!iranNoVpnMode && term.isNotBlank() && SourceResolver.isHostHealthy("itunes.apple.com")) {
+            try {
+                val itunesResp = itunesApi.searchTracks(
+                    term = term.trim(),
+                    country = countryCode?.takeIf { it != "IR" } ?: "US"
+                )
+                SourceResolver.recordSuccess("https://itunes.apple.com/search")
+                val mappedItunes = itunesResp.results.mapNotNull { dto ->
+                    val title = dto.trackName?.trim().orEmpty()
+                    val artist = dto.artistName?.trim().orEmpty()
+                    val streamUrl = dto.previewUrl?.trim().orEmpty()
+                    if (title.isBlank() || artist.isBlank() || !SourceResolver.isValidStreamUrl(streamUrl)) {
+                        null
+                    } else {
+                        val id = 2_000_000L + abs((dto.trackId ?: streamUrl.hashCode().toLong()))
+                        Track(
+                            id = id,
+                            title = title,
+                            artist = artist,
+                            album = dto.collectionName?.takeIf { it.isNotBlank() } ?: "Single",
+                            artworkUrl = dto.artworkUrl100?.replace("100x100bb", "600x600bb") ?: "",
+                            previewUrl = streamUrl,
+                            genre = dto.primaryGenreName ?: "Pop",
+                            durationMs = (dto.trackTimeMillis ?: 0L).coerceAtLeast(0L),
+                            releaseYear = dto.releaseDate?.take(4) ?: "2025",
+                            countryCode = countryCode ?: "US",
+                            isFavorite = favoriteIds.contains(id),
+                            playCount = 95000,
+                            sourceId = "itunes"
+                        )
+                    }
+                }
+                fullTracks.addAll(mappedItunes)
+            } catch (e: Exception) {
+                encounteredNetworkError = true
+                SourceResolver.recordFailure("https://itunes.apple.com/search")
+                AppLogger.w("searchTracks:itunes", "International iTunes query failed", e)
+            }
+        }
+
+        // Validate all candidate tracks before returning (requires non-blank title, artist, and valid stream URL)
+        var results = fullTracks
+            .filter { it.title.isNotBlank() && it.artist.isNotBlank() && SourceResolver.isValidStreamUrl(it.previewUrl) }
+            .distinctBy { "${it.id}_${it.previewUrl}" }
+
         if (!countryCode.isNullOrBlank() && term.isBlank()) {
             results = results.filter { it.countryCode.equals(countryCode, ignoreCase = true) }
         }
@@ -106,7 +208,17 @@ class MusicRepository(
             results = results.filter { it.releaseYear.startsWith(yearFilter) }
         }
 
-        searchCache[cacheKey] = results
+        // Fixes BUG-06: Do not cache empty results if a network error occurred
+        if (results.isNotEmpty() || !encounteredNetworkError) {
+            cacheMutex.withLock {
+                if (searchCache.size >= MAX_CACHE_ENTRIES) {
+                    val oldestKey = searchCache.keys.firstOrNull()
+                    if (oldestKey != null) searchCache.remove(oldestKey)
+                }
+                searchCache[cacheKey] = CacheEntry(results, now)
+            }
+        }
+
         results
     }
 
@@ -114,7 +226,12 @@ class MusicRepository(
         artistName: String,
         sortOption: ArtistSortOption = ArtistSortOption.TRENDING
     ): List<Track> = withContext(Dispatchers.IO) {
-        val favoriteIds = musicDao.getAllFavoriteIds().first().toSet()
+        val favoriteIds = try {
+            musicDao.getAllFavoriteIds().first().toSet()
+        } catch (e: Exception) {
+            AppLogger.w("getTracksByArtist:favorites", "Failed reading favorite IDs", e)
+            emptySet()
+        }
         val allCurated = getAllCuratedFullTracks(favoriteIds)
 
         val cleanTarget = artistName.trim()
@@ -123,15 +240,18 @@ class MusicRepository(
                 cleanTarget.contains(it.artist, ignoreCase = true)
         }.toMutableList()
 
-        // Also fetch live tracks for this artist from unfiltered Iranian music portal (musics-fa.com)
-        val liveArtistTracks = fetchLiveFromMusicsFa(
-            query = cleanTarget,
-            favoriteIds = favoriteIds,
-            defaultArtist = cleanTarget
-        )
-        matched.addAll(liveArtistTracks)
+        if (cleanTarget.isNotBlank() && SourceResolver.isHostHealthy("musics-fa.com")) {
+            val liveArtistResult = fetchLiveFromMusicsFa(
+                query = cleanTarget,
+                favoriteIds = favoriteIds,
+                defaultArtist = cleanTarget
+            )
+            matched.addAll(liveArtistResult.tracks)
+        }
 
-        val unique = matched.distinctBy { it.previewUrl }
+        val unique = matched
+            .filter { it.title.isNotBlank() && it.artist.isNotBlank() && SourceResolver.isValidStreamUrl(it.previewUrl) }
+            .distinctBy { it.previewUrl }
 
         when (sortOption) {
             ArtistSortOption.TRENDING -> unique.sortedByDescending { it.playCount }
@@ -139,19 +259,25 @@ class MusicRepository(
         }
     }
 
+    private data class LiveFetchResult(
+        val tracks: List<Track>,
+        val hadNetworkFailure: Boolean
+    )
+
     /**
-     * Live scraper for Musics-FA (unfiltered Iranian music server)
-     * Returns real full-length 320/128kbps MP3s and real album cover JPGs that work in Iran without VPN.
+     * Live adapter for Musics-FA using isolated [MusicsFaHtmlParser] and [SourceResolver] health tracking
+     * (Fixes BUG-04, BUG-05, BUG-13).
      */
     private fun fetchLiveFromMusicsFa(
         query: String,
         favoriteIds: Set<Long>,
         defaultArtist: String? = null,
         countryCode: String = "IR"
-    ): List<Track> {
+    ): LiveFetchResult {
+        val endpoint = "https://musics-fa.com/"
         return try {
             val encoded = URLEncoder.encode(query.trim(), "UTF-8")
-            val url = "https://musics-fa.com/?s=$encoded"
+            val url = "$endpoint?s=$encoded"
             val request = Request.Builder()
                 .url(url)
                 .header(
@@ -161,84 +287,58 @@ class MusicRepository(
                 .build()
 
             scraperClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val html = response.body?.string() ?: return emptyList()
-
-                val articleRegex = Regex("<article[^>]*>(.*?)</article>", RegexOption.DOT_MATCHES_ALL)
-                val mp3Regex = Regex("https://dls\\.musics-fa\\.com/[^\\s\"<>]+\\.mp3")
-                val imgRegex = Regex("https://musics-fa\\.com/wp-content/uploads/[^\\s\"<>]+\\.jpg")
-                val titleRegex = Regex("<h2[^>]*>.*?<a[^>]*>([^<]+)</a>", RegexOption.DOT_MATCHES_ALL)
-
-                val tracks = mutableListOf<Track>()
-                for (match in articleRegex.findAll(html)) {
-                    val block = match.groupValues[1]
-                    val mp3Url = mp3Regex.find(block)?.value ?: continue
-                    val rawImgUrl = imgRegex.find(block)?.value
-                    val fullImgUrl = rawImgUrl?.replace(Regex("-\\d+x\\d+(?=\\.jpg$)"), "")
-                        ?: "file:///android_asset/covers/cover_1013.jpg"
-
-                    val rawHeading = titleRegex.find(block)?.groupValues?.getOrNull(1)?.trim() ?: query
-                    val cleaned = rawHeading
-                        .replace("دانلود آهنگ جدید", "")
-                        .replace("دانلود آهنگ", "")
-                        .replace("دانلود ریمیکس", "ریمیکس")
-                        .replace("با کیفیت عالی", "")
-                        .trim()
-
-                    val artist = defaultArtist ?: extractArtistFromTitleOrMp3(cleaned, mp3Url, query)
-                    val songTitle = cleaned.replace(artist, "").trim().ifBlank { cleaned }
-
-                    val year = when {
-                        mp3Url.contains("/2026/") || fullImgUrl.contains("/2026/") -> "2026"
-                        mp3Url.contains("/2025/") || fullImgUrl.contains("/2025/") || mp3Url.contains("/1404/") -> "2025"
-                        mp3Url.contains("/2024/") || fullImgUrl.contains("/2024/") || mp3Url.contains("/1403/") -> "2024"
-                        else -> "2023"
-                    }
-
-                    val id = abs(mp3Url.hashCode().toLong()).coerceAtLeast(5000L)
-                    tracks.add(
-                        Track(
-                            id = id,
-                            title = songTitle,
-                            artist = artist,
-                            album = "تک‌آهنگ کامل ($year)",
-                            artworkUrl = fullImgUrl,
-                            previewUrl = mp3Url,
-                            genre = "پاپ",
-                            durationMs = 215000L,
-                            releaseYear = year,
-                            countryCode = countryCode,
-                            isFavorite = favoriteIds.contains(id),
-                            playCount = 85000 + (abs(id.toInt()) % 35000)
-                        )
-                    )
+                if (!response.isSuccessful) {
+                    val isHard = response.code in listOf(403, 429, 503)
+                    SourceResolver.recordFailure(endpoint, isHardFailure = isHard)
+                    AppLogger.w("fetchLiveFromMusicsFa", "HTTP ${response.code} for query=$query")
+                    return LiveFetchResult(emptyList(), hadNetworkFailure = true)
                 }
-                tracks
+                val html = response.body?.string().orEmpty()
+                when (val outcome = MusicsFaHtmlParser.parseHtml(html, query, favoriteIds, defaultArtist, countryCode)) {
+                    is MusicsFaHtmlParser.ParseOutcome.Success -> {
+                        SourceResolver.recordSuccess(endpoint)
+                        LiveFetchResult(outcome.tracks, hadNetworkFailure = false)
+                    }
+                    is MusicsFaHtmlParser.ParseOutcome.EmptyResult -> {
+                        SourceResolver.recordSuccess(endpoint)
+                        LiveFetchResult(emptyList(), hadNetworkFailure = false)
+                    }
+                    is MusicsFaHtmlParser.ParseOutcome.CaptchaOrBlocked -> {
+                        SourceResolver.recordFailure(endpoint, isHardFailure = true)
+                        AppLogger.w("fetchLiveFromMusicsFa", "Anti-bot/CAPTCHA challenge detected on musics-fa")
+                        LiveFetchResult(emptyList(), hadNetworkFailure = true)
+                    }
+                    is MusicsFaHtmlParser.ParseOutcome.StructureChanged -> {
+                        AppLogger.w("fetchLiveFromMusicsFa", "DOM structure change: ${outcome.reason}")
+                        LiveFetchResult(emptyList(), hadNetworkFailure = false)
+                    }
+                }
             }
-        } catch (_: Exception) {
-            emptyList()
+        } catch (e: Exception) {
+            SourceResolver.recordFailure(endpoint, isHardFailure = false)
+            AppLogger.w("fetchLiveFromMusicsFa", "Network exception fetching live results", e)
+            LiveFetchResult(emptyList(), hadNetworkFailure = true)
         }
-    }
-
-    private fun extractArtistFromTitleOrMp3(cleanedTitle: String, mp3Url: String, fallbackQuery: String): String {
-        for (country in CountriesData.allCountries) {
-            for (knownArtist in country.topArtists) {
-                if (cleanedTitle.contains(knownArtist, ignoreCase = true)) return knownArtist
-            }
-        }
-        val fileName = mp3Url.substringAfterLast("/").replace("%20", " ")
-        val artistPart = fileName.substringBefore(" - ").trim()
-        return if (artistPart.isNotBlank() && artistPart.length < 30) artistPart else fallbackQuery
     }
 
     suspend fun getNewReleasesForCountry(country: Country): List<Track> = withContext(Dispatchers.IO) {
-        val favoriteIds = musicDao.getAllFavoriteIds().first().toSet()
+        val favoriteIds = try {
+            musicDao.getAllFavoriteIds().first().toSet()
+        } catch (e: Exception) {
+            AppLogger.w("getNewReleasesForCountry", "Failed reading favorites", e)
+            emptySet()
+        }
         getCuratedTracksForCountry(country, favoriteIds)
             .sortedByDescending { it.releaseYear.toIntOrNull() ?: 2026 }
     }
 
     suspend fun getTrendingForCountry(country: Country): List<Track> = withContext(Dispatchers.IO) {
-        val favoriteIds = musicDao.getAllFavoriteIds().first().toSet()
+        val favoriteIds = try {
+            musicDao.getAllFavoriteIds().first().toSet()
+        } catch (e: Exception) {
+            AppLogger.w("getTrendingForCountry", "Failed reading favorites", e)
+            emptySet()
+        }
         getCuratedTracksForCountry(country, favoriteIds)
             .sortedByDescending { it.playCount }
     }
@@ -247,7 +347,12 @@ class MusicRepository(
      * Filters tracks strictly for the selected country AND the selected mood category.
      */
     suspend fun getTracksForMood(moodQuery: String, countryCode: String): List<Track> = withContext(Dispatchers.IO) {
-        val favoriteIds = musicDao.getAllFavoriteIds().first().toSet()
+        val favoriteIds = try {
+            musicDao.getAllFavoriteIds().first().toSet()
+        } catch (e: Exception) {
+            AppLogger.w("getTracksForMood", "Failed reading favorites", e)
+            emptySet()
+        }
         val country = CountriesData.getCountryByCode(countryCode)
         val countryTracks = getCuratedTracksForCountry(country, favoriteIds)
 
@@ -332,33 +437,48 @@ class MusicRepository(
         if (filtered.isNotEmpty()) filtered else countryTracks
     }
 
-    // Sanitize any track loaded from local Room DB so old blocked/synthetic URLs are upgraded automatically
-    private fun sanitizeStoredTrack(track: Track): Track {
-        val curatedMatch = getAllCuratedFullTracks(emptySet()).find { it.id == track.id }
+    /**
+     * Fixes BUG-01, BUG-14, and UI-14:
+     * - Matches curated tracks strictly by composite (id + title/artist) so non-curated tracks
+     *   never collide with curated IDs.
+     * - NEVER replaces an empty/invalid previewUrl with another song's MP3 ("Roode Sookhte").
+     *   If a stored URL is a deprecated synthetic link (soundhelix/archive.org), clears it to ""
+     *   so SourceResolver reports SOURCE_UNAVAILABLE honestly.
+     * - Preserves neutral empty artworkUrl ("") for unbundled tracks so UI renders a neutral placeholder
+     *   instead of another album's cover.
+     */
+    internal fun sanitizeStoredTrack(track: Track): Track {
+        val curatedMatch = getAllCuratedFullTracks(emptySet()).find { curated ->
+            curated.id == track.id && (
+                curated.title.equals(track.title, ignoreCase = true) ||
+                    curated.artist.equals(track.artist, ignoreCase = true)
+                )
+        }
         if (curatedMatch != null) {
             return curatedMatch.copy(isFavorite = track.isFavorite)
         }
+
         val cleanArt = if (
             track.artworkUrl.isBlank() ||
             track.artworkUrl.contains("picsum.photos", ignoreCase = true) ||
             track.artworkUrl.contains("unsplash.com", ignoreCase = true)
         ) {
-            val coverIds = listOf(1013, 1014, 1015, 1016, 1017, 1018, 1019, 1001, 1002, 1003, 1005, 1008)
-            val chosen = coverIds[abs(track.id.toInt()) % coverIds.size]
-            "file:///android_asset/covers/cover_$chosen.jpg"
+            "" // Neutral placeholder will be shown by TrackArtwork (Fixes UI-14)
         } else {
             track.artworkUrl
         }
-        val cleanMp3 = if (
-            track.previewUrl.isBlank() ||
-            track.previewUrl.contains("soundhelix.com", ignoreCase = true) ||
-            track.previewUrl.contains("archive.org", ignoreCase = true)
-        ) {
-            "https://dls.musics-fa.com/song/alibz/2026/08/Mohsen%20Chavoshi%20-%20Roode%20Sookhte%20Musics-Fa.mp3"
-        } else {
+
+        val cleanMp3 = if (SourceResolver.isValidStreamUrl(track.previewUrl)) {
             track.previewUrl
+        } else {
+            "" // Fixes BUG-01: Never substitute a different song's MP3!
         }
-        return track.copy(artworkUrl = cleanArt, previewUrl = cleanMp3)
+
+        return track.copy(
+            artworkUrl = cleanArt,
+            previewUrl = cleanMp3,
+            sourceId = if (track.id < 10_000L) "curated" else "stored"
+        )
     }
 
     // Room Favorites
@@ -373,13 +493,23 @@ class MusicRepository(
     suspend fun toggleFavorite(track: Track): Boolean = withContext(Dispatchers.IO) {
         val currentFavs = musicDao.getAllFavoriteIds().first()
         val isFav = currentFavs.contains(track.id)
-        if (isFav) {
+        val newState = if (isFav) {
             musicDao.deleteFavorite(track.id)
             false
         } else {
             musicDao.insertFavorite(track.toFavoriteEntity())
             true
         }
+        // Keep cached entries in sync immediately (Fixes BUG-06)
+        cacheMutex.withLock {
+            for ((key, entry) in searchCache.entries) {
+                val updatedList = entry.tracks.map { cachedTrack ->
+                    if (cachedTrack.id == track.id) cachedTrack.copy(isFavorite = newState) else cachedTrack
+                }
+                searchCache[key] = entry.copy(tracks = updatedList)
+            }
+        }
+        newState
     }
 
     // Room History
@@ -1410,4 +1540,9 @@ class MusicRepository(
             playCount = 127000
         )
     )
+
+    companion object {
+        const val CACHE_TTL_MS = 5 * 60 * 1000L // 5 minutes TTL (Fixes BUG-06)
+        const val MAX_CACHE_ENTRIES = 40
+    }
 }

@@ -9,9 +9,12 @@ import com.example.data.model.AudioQuality
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
 import com.example.data.model.MoodCategory
+import com.example.data.model.PlaybackError
 import com.example.data.model.PlaybackMode
 import com.example.data.model.Playlist
 import com.example.data.model.Track
+import com.example.util.AppLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +59,7 @@ class MainViewModel : ViewModel() {
     )
     val moodCategories: StateFlow<List<MoodCategory>> = _moodCategories.asStateFlow()
 
-    // Synchronously initialized on frame 0 so there is zero empty state or LTR/RTL layout jump!
+    // Synchronously initialized on frame 0 so there is zero empty state or LTR/RTL layout jump
     private val _trendingTracks = MutableStateFlow<List<Track>>(
         repository.getInitialTrendingSync(initialCountry)
     )
@@ -69,6 +72,9 @@ class MainViewModel : ViewModel() {
 
     private val _isLoadingTrending = MutableStateFlow(false)
     val isLoadingTrending: StateFlow<Boolean> = _isLoadingTrending.asStateFlow()
+
+    private val _trendingErrorMessage = MutableStateFlow<String?>(null)
+    val trendingErrorMessage: StateFlow<String?> = _trendingErrorMessage.asStateFlow()
 
     val listeningHistory: StateFlow<List<Track>> = repository.getListeningHistory()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -132,11 +138,14 @@ class MainViewModel : ViewModel() {
     val isBuffering: StateFlow<Boolean> = playerController.isBuffering
     val isRetrying: StateFlow<Boolean> = playerController.isRetrying
     val retryCount: StateFlow<Int> = playerController.retryCount
+    val playbackError: StateFlow<PlaybackError?> = playerController.playbackError
     val currentPositionMs: StateFlow<Long> = playerController.currentPositionMs
     val durationMs: StateFlow<Long> = playerController.durationMs
     val playbackMode: StateFlow<PlaybackMode> = playerController.playbackMode
     val audioQuality: StateFlow<AudioQuality> = playerController.audioQuality
-    val iranNoVpnMode: StateFlow<Boolean> = playerController.iranNoVpnMode
+    val hasQualityVariant: StateFlow<Boolean> = playerController.hasQualityVariant
+    val effectiveBitrateLabel: StateFlow<String> = playerController.effectiveBitrateLabel
+    val iranNoVpnMode: StateFlow<Boolean> = userPreferences.iranNoVpnMode
     val queue: StateFlow<List<Track>> = playerController.queue
 
     // Dialog & Sheet States
@@ -152,6 +161,11 @@ class MainViewModel : ViewModel() {
     private val _trackForPlaylist = MutableStateFlow<Track?>(null)
     val trackForPlaylist: StateFlow<Track?> = _trackForPlaylist.asStateFlow()
 
+    // Fixes BUG-08: Explicit coroutine Jobs for every async flow to cancel stale concurrent requests
+    private var trendingJob: Job? = null
+    private var moodJob: Job? = null
+    private var artistJob: Job? = null
+    private var playlistTracksJob: Job? = null
     private var searchJob: Job? = null
 
     init {
@@ -163,7 +177,22 @@ class MainViewModel : ViewModel() {
     }
 
     fun setIranNoVpnMode(enabled: Boolean) {
+        userPreferences.setIranNoVpnMode(enabled)
         playerController.setIranNoVpnMode(enabled)
+        viewModelScope.launch {
+            repository.clearSearchCache()
+            if (_searchQuery.value.isNotBlank() || _searchGenreFilter.value != null ||
+                _searchYearFilter.value != null || _searchCountryFilter.value != null
+            ) {
+                executeSearch(_searchQuery.value)
+            }
+        }
+    }
+
+    fun clearTemporaryCache() {
+        viewModelScope.launch {
+            repository.clearSearchCache()
+        }
     }
 
     fun navigateTo(screen: Screen) {
@@ -184,12 +213,25 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    // Fixes BUG-08 & BUG-13: Cancels previous artistJob, checks parameter match, and resets _isLoadingArtist in finally
     private fun loadArtistTracks(artistName: String, sortOption: ArtistSortOption) {
-        viewModelScope.launch {
+        artistJob?.cancel()
+        artistJob = viewModelScope.launch {
             _isLoadingArtist.value = true
-            val tracks = repository.getTracksByArtist(artistName, sortOption)
-            _artistTracks.value = tracks
-            _isLoadingArtist.value = false
+            try {
+                val tracks = repository.getTracksByArtist(artistName, sortOption)
+                if (_selectedArtistName.value == artistName && _artistSortOption.value == sortOption) {
+                    _artistTracks.value = tracks
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                AppLogger.w("loadArtistTracks", "Error loading tracks for artist=$artistName", e)
+            } finally {
+                if (_selectedArtistName.value == artistName && _artistSortOption.value == sortOption) {
+                    _isLoadingArtist.value = false
+                }
+            }
         }
     }
 
@@ -198,7 +240,6 @@ class MainViewModel : ViewModel() {
         userPreferences.setOnboardingCompleted(true)
         _selectedCountry.value = country
         _moodCategories.value = CountriesData.getMoodCategoriesForCountry(country)
-        // Populate synchronously before switching screen so HomeScreen renders in RTL with full data on frame 0
         _trendingTracks.value = repository.getInitialTrendingSync(country)
         _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
         _activeMood.value = null
@@ -216,46 +257,73 @@ class MainViewModel : ViewModel() {
         _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
         _isCountryPickerVisible.value = false
 
-        // If a mood category was open, update it to the new country's corresponding category & reload its tracks
         val currentMoodId = _activeMood.value?.id
         if (currentMoodId != null) {
             val mappedMood = newCountryMoods.find { it.id == currentMoodId }
-            _activeMood.value = mappedMood
-            if (mappedMood != null) {
-                viewModelScope.launch {
-                    _isLoadingMood.value = true
-                    _moodTracks.value = repository.getTracksForMood(mappedMood.query, country.code)
-                    _isLoadingMood.value = false
-                }
-            } else {
-                _moodTracks.value = emptyList()
-            }
+            selectMood(mappedMood)
+        } else {
+            moodJob?.cancel()
+            _isLoadingMood.value = false
         }
 
         loadTrendingForCountry(country)
     }
 
+    // Fixes BUG-07 & BUG-08: Activates _isLoadingTrending = true at start, cancels previous job,
+    // verifies country match before applying, and guarantees false in finally
     fun loadTrendingForCountry(country: Country) {
-        viewModelScope.launch {
-            val tracks = repository.getTrendingForCountry(country)
-            _trendingTracks.value = tracks
-            val newest = repository.getNewReleasesForCountry(country)
-            _newReleaseTracks.value = newest
-            _isLoadingTrending.value = false
+        trendingJob?.cancel()
+        trendingJob = viewModelScope.launch {
+            _isLoadingTrending.value = true
+            _trendingErrorMessage.value = null
+            try {
+                val tracks = repository.getTrendingForCountry(country)
+                val newest = repository.getNewReleasesForCountry(country)
+                if (_selectedCountry.value.code == country.code) {
+                    _trendingTracks.value = tracks
+                    _newReleaseTracks.value = newest
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                AppLogger.w("loadTrendingForCountry", "Error loading trending for ${country.code}", e)
+                if (_selectedCountry.value.code == country.code) {
+                    _trendingErrorMessage.value = e.localizedMessage ?: "Error loading tracks"
+                }
+            } finally {
+                if (_selectedCountry.value.code == country.code) {
+                    _isLoadingTrending.value = false
+                }
+            }
         }
     }
 
+    // Fixes BUG-08: Cancels previous moodJob and verifies active mood & country before setting results
     fun selectMood(mood: MoodCategory?) {
+        moodJob?.cancel()
         _activeMood.value = mood
         if (mood == null) {
             _moodTracks.value = emptyList()
+            _isLoadingMood.value = false
             return
         }
-        viewModelScope.launch {
+        val targetCountryCode = _selectedCountry.value.code
+        moodJob = viewModelScope.launch {
             _isLoadingMood.value = true
-            val tracks = repository.getTracksForMood(mood.query, _selectedCountry.value.code)
-            _moodTracks.value = tracks
-            _isLoadingMood.value = false
+            try {
+                val tracks = repository.getTracksForMood(mood.query, targetCountryCode)
+                if (_activeMood.value?.id == mood.id && _selectedCountry.value.code == targetCountryCode) {
+                    _moodTracks.value = tracks
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                AppLogger.w("selectMood", "Failed loading mood=${mood.id}", e)
+            } finally {
+                if (_activeMood.value?.id == mood.id && _selectedCountry.value.code == targetCountryCode) {
+                    _isLoadingMood.value = false
+                }
+            }
         }
     }
 
@@ -274,40 +342,89 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun submitSearchNow() {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            executeSearch(_searchQuery.value)
+        }
+    }
+
+    fun clearAllSearchFilters() {
+        _searchGenreFilter.value = null
+        _searchYearFilter.value = null
+        _searchCountryFilter.value = null
+        searchJob?.cancel()
+        if (_searchQuery.value.isBlank()) {
+            _searchResults.value = emptyList()
+            _isSearching.value = false
+        } else {
+            searchJob = viewModelScope.launch {
+                executeSearch(_searchQuery.value)
+            }
+        }
+    }
+
     fun setGenreFilter(genre: String?) {
         _searchGenreFilter.value = genre
-        viewModelScope.launch { executeSearch(_searchQuery.value) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch { executeSearch(_searchQuery.value) }
     }
 
     fun setYearFilter(year: String?) {
         _searchYearFilter.value = year
-        viewModelScope.launch { executeSearch(_searchQuery.value) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch { executeSearch(_searchQuery.value) }
     }
 
     fun setSearchCountryFilter(code: String?) {
         _searchCountryFilter.value = code
+        searchJob?.cancel()
         if (_searchQuery.value.isNotBlank() || _searchGenreFilter.value != null || _searchYearFilter.value != null || code != null) {
-            viewModelScope.launch { executeSearch(_searchQuery.value) }
+            searchJob = viewModelScope.launch { executeSearch(_searchQuery.value) }
         } else {
             _searchResults.value = emptyList()
+            _isSearching.value = false
         }
     }
 
     private suspend fun executeSearch(query: String) {
+        val targetCountry = _searchCountryFilter.value ?: _selectedCountry.value.code
+        val targetGenre = _searchGenreFilter.value
+        val targetYear = _searchYearFilter.value
+        val targetNoVpn = userPreferences.iranNoVpnMode.value
+
         _isSearching.value = true
-        val results = repository.searchTracks(
-            term = query,
-            countryCode = _searchCountryFilter.value ?: _selectedCountry.value.code,
-            genreFilter = _searchGenreFilter.value,
-            yearFilter = _searchYearFilter.value
-        )
-        _searchResults.value = results
-        _isSearching.value = false
+        try {
+            val results = repository.searchTracks(
+                term = query,
+                countryCode = targetCountry,
+                genreFilter = targetGenre,
+                yearFilter = targetYear,
+                iranNoVpnMode = targetNoVpn
+            )
+            if (_searchQuery.value == query &&
+                (_searchCountryFilter.value ?: _selectedCountry.value.code) == targetCountry &&
+                _searchGenreFilter.value == targetGenre &&
+                _searchYearFilter.value == targetYear
+            ) {
+                _searchResults.value = results
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            AppLogger.w("executeSearch", "Error searching query=$query", e)
+        } finally {
+            _isSearching.value = false
+        }
     }
 
     // Playback Actions
     fun playTrack(track: Track, newQueue: List<Track>? = null) {
         playerController.playTrack(track, newQueue)
+    }
+
+    fun retryPlaybackManually() {
+        playerController.retryCurrentTrackManually()
     }
 
     fun togglePlayPause() {
@@ -353,7 +470,27 @@ class MainViewModel : ViewModel() {
 
     fun toggleFavorite(track: Track) {
         viewModelScope.launch {
-            repository.toggleFavorite(track)
+            try {
+                val isNowFav = repository.toggleFavorite(track)
+                // Also update in-memory lists immediately so heart icons respond in 0ms
+                _trendingTracks.value = _trendingTracks.value.map {
+                    if (it.id == track.id) it.copy(isFavorite = isNowFav) else it
+                }
+                _newReleaseTracks.value = _newReleaseTracks.value.map {
+                    if (it.id == track.id) it.copy(isFavorite = isNowFav) else it
+                }
+                _moodTracks.value = _moodTracks.value.map {
+                    if (it.id == track.id) it.copy(isFavorite = isNowFav) else it
+                }
+                _searchResults.value = _searchResults.value.map {
+                    if (it.id == track.id) it.copy(isFavorite = isNowFav) else it
+                }
+                _artistTracks.value = _artistTracks.value.map {
+                    if (it.id == track.id) it.copy(isFavorite = isNowFav) else it
+                }
+            } catch (e: Exception) {
+                AppLogger.w("toggleFavorite", "Failed toggling favorite for track=${track.id}", e)
+            }
         }
     }
 
@@ -361,15 +498,20 @@ class MainViewModel : ViewModel() {
     fun createPlaylist(name: String, description: String = "") {
         if (name.isBlank()) return
         viewModelScope.launch {
-            repository.createPlaylist(name, description)
-            _isCreatePlaylistVisible.value = false
+            try {
+                repository.createPlaylist(name, description)
+                _isCreatePlaylistVisible.value = false
+            } catch (e: Exception) {
+                AppLogger.w("createPlaylist", "Failed creating playlist", e)
+            }
         }
     }
 
     fun openPlaylist(playlist: Playlist) {
         _selectedPlaylist.value = playlist
         _currentScreen.value = Screen.PlaylistDetail(playlist)
-        viewModelScope.launch {
+        playlistTracksJob?.cancel()
+        playlistTracksJob = viewModelScope.launch {
             repository.getTracksForPlaylist(playlist.id).collect {
                 _selectedPlaylistTracks.value = it
             }
@@ -378,9 +520,13 @@ class MainViewModel : ViewModel() {
 
     fun deletePlaylist(playlist: Playlist) {
         viewModelScope.launch {
-            repository.deletePlaylist(playlist.id)
-            if (_selectedPlaylist.value?.id == playlist.id) {
-                _currentScreen.value = Screen.Library
+            try {
+                repository.deletePlaylist(playlist.id)
+                if (_selectedPlaylist.value?.id == playlist.id) {
+                    _currentScreen.value = Screen.Library
+                }
+            } catch (e: Exception) {
+                AppLogger.w("deletePlaylist", "Failed deleting playlist=${playlist.id}", e)
             }
         }
     }
@@ -395,20 +541,32 @@ class MainViewModel : ViewModel() {
 
     fun addTrackToPlaylist(playlistId: Long, track: Track) {
         viewModelScope.launch {
-            repository.addTrackToPlaylist(playlistId, track)
-            _trackForPlaylist.value = null
+            try {
+                repository.addTrackToPlaylist(playlistId, track)
+                _trackForPlaylist.value = null
+            } catch (e: Exception) {
+                AppLogger.w("addTrackToPlaylist", "Failed adding track to playlist", e)
+            }
         }
     }
 
     fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) {
         viewModelScope.launch {
-            repository.removeTrackFromPlaylist(playlistId, trackId)
+            try {
+                repository.removeTrackFromPlaylist(playlistId, trackId)
+            } catch (e: Exception) {
+                AppLogger.w("removeTrackFromPlaylist", "Failed removing track from playlist", e)
+            }
         }
     }
 
     fun clearHistory() {
         viewModelScope.launch {
-            repository.clearHistory()
+            try {
+                repository.clearHistory()
+            } catch (e: Exception) {
+                AppLogger.w("clearHistory", "Failed clearing history", e)
+            }
         }
     }
 

@@ -24,12 +24,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,7 +82,9 @@ fun HomeScreen(
     onArtistClick: (String) -> Unit,
     onStopTrackClick: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
-    onAddToPlaylistClick: (Track) -> Unit
+    onAddToPlaylistClick: (Track) -> Unit,
+    trendingErrorMessage: String? = null,
+    onRetryTrending: () -> Unit = {}
 ) {
     val lang = LocalAppLanguage.current
     val greeting = rememberGreeting(lang)
@@ -91,7 +97,7 @@ fun HomeScreen(
         contentPadding = PaddingValues(bottom = 130.dp)
     ) {
         // Top App Bar / Greeting + Country Switcher + Car Mode Icon
-        item {
+        item(key = "home_header") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -132,6 +138,7 @@ fun HomeScreen(
                     // Country Switcher Pill
                     Surface(
                         modifier = Modifier
+                            .minimumInteractiveComponentSize()
                             .clip(RoundedCornerShape(20.dp))
                             .border(1.dp, BorderHighlight, RoundedCornerShape(20.dp))
                             .clickable(onClick = onCountryClick)
@@ -159,7 +166,8 @@ fun HomeScreen(
                     IconButton(
                         onClick = onDriveClick,
                         modifier = Modifier
-                            .size(42.dp)
+                            .minimumInteractiveComponentSize()
+                            .size(48.dp)
                             .clip(CircleShape)
                             .background(OledSurfaceVariant)
                             .testTag("car_mode_shortcut")
@@ -176,7 +184,7 @@ fun HomeScreen(
         }
 
         // 1. Modern 2-Column Explore & Moods Grid (Dynamic per Selected Country)
-        item {
+        item(key = "home_moods_${selectedCountry.code}") {
             Column(modifier = Modifier.padding(top = 4.dp)) {
                 SectionHeader(
                     title = tr(
@@ -222,7 +230,7 @@ fun HomeScreen(
 
         // Active Mood Tracks (if a Mood or "بروزترین‌ها" is selected)
         if (activeMood != null) {
-            item {
+            item(key = "active_mood_header_${activeMood.id}") {
                 Spacer(modifier = Modifier.height(18.dp))
                 SectionHeader(
                     title = tr(
@@ -239,7 +247,7 @@ fun HomeScreen(
             }
 
             if (isLoadingMood) {
-                item {
+                item(key = "mood_loading") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -250,7 +258,10 @@ fun HomeScreen(
                     }
                 }
             } else {
-                items(moodTracks) { track ->
+                items(
+                    items = moodTracks,
+                    key = { track -> "mood_${activeMood.id}_${track.id}" }
+                ) { track ->
                     Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         TrackItemCard(
                             track = track,
@@ -269,7 +280,7 @@ fun HomeScreen(
 
         // 2. Just Released / Newest Tracks Shelf (بروزترین انتشارها - Horizontal Carousel)
         if (newReleaseTracks.isNotEmpty()) {
-            item {
+            item(key = "home_new_releases_${selectedCountry.code}") {
                 Spacer(modifier = Modifier.height(22.dp))
                 SectionHeader(
                     title = tr(
@@ -288,7 +299,10 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(newReleaseTracks) { track ->
+                    items(
+                        items = newReleaseTracks,
+                        key = { track -> "new_${track.id}" }
+                    ) { track ->
                         HorizontalShelfTrackCard(
                             track = track,
                             badgeText = "NEW ${track.releaseYear}",
@@ -303,7 +317,7 @@ fun HomeScreen(
         }
 
         // 3. Trending & Popular Section directly under New Releases in the EXACT SAME Horizontal Carousel Format!
-        item {
+        item(key = "home_trending_${selectedCountry.code}") {
             Spacer(modifier = Modifier.height(22.dp))
             SectionHeader(
                 title = tr(
@@ -327,12 +341,52 @@ fun HomeScreen(
                 ) {
                     CircularProgressIndicator(color = AccentGold)
                 }
+            } else if (trendingTracks.isEmpty() || trendingErrorMessage != null) {
+                // UI-02: Explicit error / empty state with Retry button
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = trendingErrorMessage ?: tr(
+                                lang,
+                                "خطا در دریافت لیست ترندها",
+                                "Unable to load trending tracks"
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = onRetryTrending,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentGold,
+                                contentColor = Color.Black
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("retry_trending_btn")
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = tr(lang, "تلاش مجدد", "Retry"),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             } else {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    itemsIndexed(trendingTracks) { index, track ->
+                    itemsIndexed(
+                        items = trendingTracks,
+                        key = { _, track -> "trending_${track.id}" }
+                    ) { index, track ->
                         HorizontalShelfTrackCard(
                             track = track,
                             badgeText = "🔥 #${index + 1}",
@@ -347,7 +401,7 @@ fun HomeScreen(
         }
 
         // 4. Recently Played Section (اخیر شنیده‌ها) right below Trending in the exact same Horizontal Shelf Format!
-        item {
+        item(key = "home_recent_played") {
             Spacer(modifier = Modifier.height(22.dp))
             SectionHeader(
                 title = tr(lang, "اخیر شنیده‌ها", "Recently Played"),
@@ -364,7 +418,10 @@ fun HomeScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(displayRecent) { track ->
+                items(
+                    items = displayRecent,
+                    key = { track -> "recent_${track.id}" }
+                ) { track ->
                     HorizontalShelfTrackCard(
                         track = track,
                         badgeText = if (recentHistory.isNotEmpty())

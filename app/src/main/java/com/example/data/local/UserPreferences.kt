@@ -22,9 +22,13 @@ class UserPreferences(context: Context) {
 
     private val _audioQuality =
         MutableStateFlow(
-            AudioQuality.valueOf(
-                prefs.getString(KEY_AUDIO_QUALITY, AudioQuality.HIGH.name) ?: AudioQuality.HIGH.name
-            )
+            try {
+                AudioQuality.valueOf(
+                    prefs.getString(KEY_AUDIO_QUALITY, AudioQuality.HIGH.name) ?: AudioQuality.HIGH.name
+                )
+            } catch (_: Exception) {
+                AudioQuality.HIGH
+            }
         )
     val audioQuality: StateFlow<AudioQuality> = _audioQuality.asStateFlow()
 
@@ -34,11 +38,16 @@ class UserPreferences(context: Context) {
                 AppLanguage.valueOf(
                     prefs.getString(KEY_APP_LANGUAGE, AppLanguage.FA.name) ?: AppLanguage.FA.name
                 )
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 AppLanguage.FA
             }
         )
     val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
+
+    // Fixes BUG-10: Persist Iran No-VPN Direct Mode preference and apply it in SourceResolver & Repository
+    private val _iranNoVpnMode =
+        MutableStateFlow(prefs.getBoolean(KEY_IRAN_NO_VPN_MODE, true))
+    val iranNoVpnMode: StateFlow<Boolean> = _iranNoVpnMode.asStateFlow()
 
     fun setOnboardingCompleted(completed: Boolean) {
         prefs.edit().putBoolean(KEY_ONBOARDING_COMPLETED, completed).apply()
@@ -60,10 +69,16 @@ class UserPreferences(context: Context) {
         _appLanguage.value = language
     }
 
+    fun setIranNoVpnMode(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_IRAN_NO_VPN_MODE, enabled).apply()
+        _iranNoVpnMode.value = enabled
+    }
+
     companion object {
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_COUNTRY_CODE = "selected_country_code"
         private const val KEY_AUDIO_QUALITY = "audio_quality"
         private const val KEY_APP_LANGUAGE = "app_language"
+        private const val KEY_IRAN_NO_VPN_MODE = "iran_no_vpn_mode"
     }
 }

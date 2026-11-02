@@ -40,6 +40,8 @@ class MeloGrooveApp : Application(), ImageLoaderFactory {
         repository = MusicRepository(database.musicDao())
         userPreferences = UserPreferences(this)
         playerController = MusicPlayerController.getInstance(this)
+        playerController.setAudioQuality(userPreferences.audioQuality.value)
+        playerController.setIranNoVpnMode(userPreferences.iranNoVpnMode.value)
 
         // Automatically record played tracks to Listening History in background
         playerController.onTrackPlayedListener = { track ->
