@@ -1,0 +1,52 @@
+[
+  {
+    "id": "new-releases",
+    "titleFa": "بروزترین انتشارها",
+    "titleEn": "Just Released",
+    "subtitleFa": "جدیدترین آهنگ‌های منتشر شده (حداکثر ۱ آهنگ از هر خواننده)",
+    "subtitleEn": "Latest songs sorted by release year (1 per artist)",
+    "kind": "SMART",
+    "rule": {
+      "countries": [],
+      "genres": [],
+      "minYear": 2024,
+      "sort": "RELEASE_YEAR_DESC",
+      "limit": 12,
+      "perArtistCap": 1
+    },
+    "trackIds": [],
+    "order": 1,
+    "enabled": true
+  },
+  {
+    "id": "trending",
+    "titleFa": "پرطرفدارها و ترند",
+    "titleEn": "Trending & Popular",
+    "subtitleFa": "محبوب‌ترین آهنگ‌های روز • برای آرشیو خواننده روی نام او بزنید",
+    "subtitleEn": "Most popular tracks • Tap artist name for full discography",
+    "kind": "SMART",
+    "rule": {
+      "countries": [],
+      "genres": [],
+      "minYear": null,
+      "sort": "PLAY_COUNT_DESC",
+      "limit": 15,
+      "perArtistCap": 2
+    },
+    "trackIds": [],
+    "order": 2,
+    "enabled": true
+  },
+  {
+    "id": "persian-traditional-gems",
+    "titleFa": "گنجینه سنتی و اصیل",
+    "titleEn": "Persian Traditional Gems",
+    "subtitleFa": "آثار ماندگار شجریان، همایون و علیرضا قربانی",
+    "subtitleEn": "Timeless classical and traditional masterpieces",
+    "kind": "CURATED",
+    "rule": null,
+    "trackIds": [1015, 1006, 1003, 1005, 1007, 1008, 1012],
+    "order": 3,
+    "enabled": true
+  }
+]

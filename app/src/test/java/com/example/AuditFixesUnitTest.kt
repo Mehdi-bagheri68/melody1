@@ -1,13 +1,25 @@
 package com.example
 
+import com.example.data.auth.AuthError
+import com.example.data.auth.AuthResult
+import com.example.data.auth.AuthState
+import com.example.data.auth.LocalEmailAuthRepository
+import com.example.data.model.ArtworkRef
 import com.example.data.model.AudioQuality
+import com.example.data.model.CountriesData
 import com.example.data.model.ErrorCategory
 import com.example.data.model.Track
+import com.example.data.repository.ArtworkResolver
+import com.example.data.repository.CatalogDataSource
+import com.example.data.repository.GroupEngine
 import com.example.data.repository.MusicsFaHtmlParser
 import com.example.data.repository.SourceResolver
 import com.example.util.BidiHelper
+import com.example.util.IdGenerator
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -105,7 +117,7 @@ class AuditFixesUnitTest {
             title = "Ghalbe Man",
             artist = "Behnam Bani",
             album = "Single",
-            artworkUrl = "file:///android_asset/covers/ir_1.jpg",
+            artworkUrl = "file:///android_asset/covers/cover_1017.jpg",
             previewUrl = "https://ups.musics-fa.com/tagdl/99/Behnam%20Bani%20-%20Ghalbe%20Man%20(320).mp3",
             durationMs = 205000L,
             genre = "پاپ",
@@ -134,5 +146,119 @@ class AuditFixesUnitTest {
     fun `UI-11 BidiHelper wraps mixed Persian and Latin strings safely`() {
         val isolated = BidiHelper.isolateLtr("Pop 2026")
         assertTrue(isolated.contains("Pop 2026"))
+    }
+
+    @Test
+    fun `N-01 every artwork belongs to the track's artist`() {
+        val tracks = CatalogDataSource.getTracks()
+        assertTrue(tracks.isNotEmpty())
+        tracks.forEach { track ->
+            track.artwork?.let { art ->
+                assertTrue(
+                    "Track ${track.id} (${track.title}) uses artwork owned by ${art.ownerArtistId}, expected ${track.artistId}",
+                    art.ownerArtistId == track.artistId || art.ownerArtistId in track.featuredArtistIds
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `N-01 no artwork file is shared between different owners`() {
+        val tracks = CatalogDataSource.getTracks()
+        val byUrl = tracks.mapNotNull { it.artwork }.groupBy { it.url }
+        byUrl.forEach { (url, list) ->
+            val owners = list.map { it.ownerArtistId }.toSet()
+            assertEquals("URL $url has multiple owners: $owners", 1, owners.size)
+        }
+    }
+
+    @Test
+    fun `N-01 ArtworkResolver rejects foreign artist cover and returns deterministic Initials`() {
+        val mismatchedTrack = Track(
+            id = 5004L,
+            title = "Gipsy Flamenco Medley",
+            artist = "Koli Band",
+            artistId = "koli-band",
+            album = "Barcelona Fiesta",
+            artworkUrl = "file:///android_asset/covers/cover_1017.jpg", // Owned by behnam-bani!
+            previewUrl = "https://dls.musics-fa.com/song/alibz/dlswm/Koli%20Band%20-%20Gipsy%20Medley%20(320).mp3"
+        )
+        val resolved = ArtworkResolver.resolve(mismatchedTrack)
+        assertTrue(
+            "Expected ArtworkRef.Initials when cover belongs to another artist",
+            resolved is ArtworkRef.Initials
+        )
+    }
+
+    @Test
+    fun `N-02 MoodCategories never reuse artist cover files`() {
+        CountriesData.allCountries.forEach { country ->
+            val moods = CountriesData.getMoodCategoriesForCountry(country)
+            moods.forEach { mood ->
+                assertTrue(
+                    "Mood ${mood.id} in ${country.code} must not use artist cover file (${mood.coverUrl})",
+                    mood.coverUrl.isBlank()
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `N-03 new-releases group respects perArtistCap`() {
+        val tracks = CatalogDataSource.getTracks().filter { it.countryCode == "IR" }
+        val group = CatalogDataSource.getDefaultNewReleasesGroup("IR")
+        val resolved = GroupEngine.evaluate(group, tracks, CatalogDataSource.getArtistsById())
+        val countsByArtist = resolved.groupingBy { it.artistId }.eachCount()
+        val cap = group.rule?.perArtistCap ?: Int.MAX_VALUE
+        assertEquals(1, cap)
+        countsByArtist.forEach { (artistId, count) ->
+            assertTrue("Artist $artistId appears $count times, cap is $cap", count <= cap)
+        }
+    }
+
+    @Test
+    fun `N-07 IdGenerator produces deterministic 64-bit IDs without collision`() {
+        val id1 = IdGenerator.stable64BitId("musics_fa", "https://dls.musics-fa.com/a.mp3")
+        val id2 = IdGenerator.stable64BitId("musics_fa", "https://dls.musics-fa.com/b.mp3")
+        val id1Repeat = IdGenerator.stable64BitId("musics_fa", "https://dls.musics-fa.com/a.mp3")
+        assertEquals(id1, id1Repeat)
+        assertNotEquals(id1, id2)
+        assertTrue(id1 > 1_000_000L)
+    }
+
+    @Test
+    fun `Section 6 LocalEmailAuthRepository sign-up, sign-in, password reset, and sign-out`() = runTest {
+        val authRepo = LocalEmailAuthRepository(musicDao = null, userPreferences = null)
+
+        // 1. Invalid email rejected
+        val invalidEmailRes = authRepo.signUp("not-an-email", "password123")
+        assertTrue(invalidEmailRes is AuthResult.Failure && invalidEmailRes.reason == AuthError.INVALID_EMAIL)
+
+        // 2. Weak password (< 8 chars) rejected
+        val weakPassRes = authRepo.signUp("user@example.com", "1234567")
+        assertTrue(weakPassRes is AuthResult.Failure && weakPassRes.reason == AuthError.WEAK_PASSWORD)
+
+        // 3. Valid sign-up succeeds
+        val signUpRes = authRepo.signUp("user@example.com", "StrongPass123", "Ali Reza")
+        assertTrue(signUpRes is AuthResult.Success)
+        assertTrue(authRepo.state.value is AuthState.SignedIn)
+
+        // 4. Duplicate sign-up rejected
+        val duplicateRes = authRepo.signUp("user@example.com", "StrongPass123")
+        assertTrue(duplicateRes is AuthResult.Failure && duplicateRes.reason == AuthError.EMAIL_IN_USE)
+
+        // 5. Sign-out transitions to SignedOut
+        authRepo.signOut()
+        assertTrue(authRepo.state.value is AuthState.SignedOut)
+
+        // 6. Wrong password rejected
+        val wrongPass = authRepo.signIn("user@example.com", "WrongPass999")
+        assertTrue(wrongPass is AuthResult.Failure && wrongPass.reason == AuthError.WRONG_CREDENTIALS)
+
+        // 7. Password reset updates password and allows sign-in
+        val resetRes = authRepo.sendPasswordReset("user@example.com", "NewSecretPass88")
+        assertTrue(resetRes is AuthResult.Success)
+        val signInNew = authRepo.signIn("user@example.com", "NewSecretPass88")
+        assertTrue(signInNew is AuthResult.Success)
     }
 }

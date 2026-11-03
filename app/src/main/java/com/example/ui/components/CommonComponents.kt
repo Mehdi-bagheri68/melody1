@@ -105,11 +105,16 @@ import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
 import com.example.util.BidiHelper
 
+import com.example.data.model.ArtworkRef
+import com.example.data.repository.ArtworkResolver
+
 /**
- * Fixes BUG-01 & UI-14:
- * - Loads authentic album covers from `file:///android_asset/covers/...` or valid remote URLs.
- * - If a track has no cover or its remote image fails to load, displays a neutral stylized
- *   vinyl/music placeholder (`NeutralArtworkPlaceholder`) instead of substituting another album's photo!
+ * Fixes N-01, U-01, U-02, U-07:
+ * - Resolves artwork strictly via [ArtworkResolver] so no cover file owned by artist A is ever
+ *   displayed on a track by artist B.
+ * - Uses `Alignment.TopCenter` with `ContentScale.Crop` so portrait artist photos keep the face centered.
+ * - When a track has no owned cover, renders a stylized Artist Monogram Avatar ([ArtworkRef.Initials])
+ *   with a deterministic two-tone gradient and artist initials.
  */
 @Composable
 fun TrackArtwork(
@@ -120,46 +125,98 @@ fun TrackArtwork(
     modifier: Modifier = Modifier,
     showTextOverlay: Boolean = true
 ) {
-    val isInvalidPlaceholderUrl = remember(imageUrl) {
-        imageUrl.isBlank() ||
-            imageUrl.contains("picsum.photos", ignoreCase = true) ||
-            imageUrl.contains("unsplash.com", ignoreCase = true)
+    val artworkRef = remember(imageUrl, title, subtitle) {
+        ArtworkResolver.resolveForUrlAndTitle(
+            imageUrl = imageUrl,
+            title = title,
+            subtitle = subtitle
+        )
     }
 
     var loadFailed by remember(imageUrl) { mutableStateOf(false) }
+    val initialsFallback = remember(title, subtitle, seedId) {
+        ArtworkResolver.resolveInitials(
+            displayName = subtitle.ifBlank { title },
+            seed = "${subtitle.ifBlank { title }}_$seedId"
+        )
+    }
 
-    Box(
-        modifier = modifier.background(
-            Brush.linearGradient(
-                colors = listOf(OledSurfaceVariant, OledSurfaceHigh)
-            )
-        ),
-        contentAlignment = Alignment.Center
-    ) {
-        if (isInvalidPlaceholderUrl || loadFailed) {
-            // Neutral stylized vinyl placeholder (never impersonates another artist's cover!)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(6.dp)
+    when {
+        artworkRef is ArtworkRef.Image && !loadFailed -> {
+            Box(
+                modifier = modifier.background(
+                    Brush.linearGradient(colors = listOf(OledSurfaceVariant, OledSurfaceHigh))
+                ),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Album,
-                    contentDescription = title,
-                    tint = AccentGold.copy(alpha = 0.75f),
-                    modifier = Modifier.size(28.dp)
+                AsyncImage(
+                    model = artworkRef.url,
+                    contentDescription = if (subtitle.isNotBlank()) "$title - $subtitle" else title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    onError = {
+                        loadFailed = true
+                    }
                 )
             }
-        } else {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                onError = {
-                    loadFailed = true
+        }
+        else -> {
+            val initials = (artworkRef as? ArtworkRef.Initials) ?: initialsFallback
+            Box(
+                modifier = modifier.background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(initials.primaryColorHex),
+                            Color(initials.secondaryColorHex)
+                        )
+                    )
+                ),
+                contentAlignment = Alignment.Center
+            ) {
+                // Subtle vinyl/monogram ring + deterministic artist initials (Fixes U-02)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize(0.76f)
+                        .clip(CircleShape)
+                        .background(Color(0x28000000))
+                        .border(1.dp, AccentGold.copy(alpha = 0.45f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (showTextOverlay) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(4.dp)
+                        ) {
+                            Text(
+                                text = initials.text,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1
+                            )
+                            if (subtitle.isNotBlank()) {
+                                Text(
+                                    text = subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AccentGold.copy(alpha = 0.9f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = initials.text,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = AccentGold,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1
+                        )
+                    }
                 }
-            )
+            }
         }
     }
 }
@@ -179,7 +236,7 @@ fun ModernMoodCard(
         )
     )
 
-    // Fixes UI-01 & UI-13: Adaptive minimum height so large font scales (1.3x-1.5x) never clip text
+    // Fixes N-02, UI-01 & UI-13: Dedicated mood emblem (never reuses artist cover photos)
     Box(
         modifier = modifier
             .heightIn(min = 96.dp)
@@ -193,20 +250,25 @@ fun ModernMoodCard(
             .clickable(onClick = onClick)
             .testTag("mood_${mood.id}")
     ) {
-        TrackArtwork(
-            imageUrl = mood.coverUrl,
-            seedId = mood.id.hashCode().toLong(),
-            title = mood.getPrimaryTitle(lang),
-            subtitle = "",
-            showTextOverlay = false,
+        Box(
             modifier = Modifier
-                .size(68.dp)
+                .size(64.dp)
                 .align(Alignment.BottomEnd)
                 .offset(x = if (lang.isRtl) (-10).dp else 10.dp, y = 8.dp)
                 .rotate(if (lang.isRtl) -14f else 14f)
-                .shadow(8.dp, RoundedCornerShape(10.dp))
-                .clip(RoundedCornerShape(10.dp))
-        )
+                .shadow(6.dp, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0x33000000))
+                .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (mood.isNewRelease) Icons.Default.Album else Icons.Default.MusicNote,
+                contentDescription = mood.getPrimaryTitle(lang),
+                tint = Color.White.copy(alpha = 0.9f),
+                modifier = Modifier.size(28.dp)
+            )
+        }
 
         Column(
             modifier = Modifier
@@ -429,7 +491,7 @@ fun TrackItemCard(
                         imageUrl = track.artworkUrl,
                         seedId = track.id,
                         title = track.title,
-                        subtitle = "",
+                        subtitle = track.artist,
                         showTextOverlay = false,
                         modifier = Modifier
                             .size(56.dp)
@@ -777,6 +839,7 @@ fun MiniPlayer(
                         imageUrl = currentTrack.artworkUrl,
                         seedId = currentTrack.id,
                         title = currentTrack.title,
+                        subtitle = currentTrack.artist,
                         showTextOverlay = false,
                         modifier = Modifier
                             .size(44.dp)

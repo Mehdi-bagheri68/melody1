@@ -5,8 +5,12 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.example.data.auth.AuthRepository
+import com.example.data.auth.AuthState
+import com.example.data.auth.LocalEmailAuthRepository
 import com.example.data.local.MeloGrooveDatabase
 import com.example.data.local.UserPreferences
+import com.example.data.repository.CatalogDataSource
 import com.example.data.repository.MusicRepository
 import com.example.playback.MusicPlayerController
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +33,9 @@ class MeloGrooveApp : Application(), ImageLoaderFactory {
     lateinit var userPreferences: UserPreferences
         private set
 
+    lateinit var authRepository: AuthRepository
+        private set
+
     lateinit var playerController: MusicPlayerController
         private set
 
@@ -36,9 +43,11 @@ class MeloGrooveApp : Application(), ImageLoaderFactory {
         super.onCreate()
         instance = this
 
+        CatalogDataSource.initialize(this)
         database = MeloGrooveDatabase.getDatabase(this)
-        repository = MusicRepository(database.musicDao())
         userPreferences = UserPreferences(this)
+        authRepository = LocalEmailAuthRepository(database.musicDao(), userPreferences)
+        repository = MusicRepository(database.musicDao())
         playerController = MusicPlayerController.getInstance(this)
         playerController.setAudioQuality(userPreferences.audioQuality.value)
         playerController.setIranNoVpnMode(userPreferences.iranNoVpnMode.value)
@@ -46,7 +55,8 @@ class MeloGrooveApp : Application(), ImageLoaderFactory {
         // Automatically record played tracks to Listening History in background
         playerController.onTrackPlayedListener = { track ->
             applicationScope.launch {
-                repository.recordPlayedTrack(track)
+                val userId = (authRepository.state.value as? AuthState.SignedIn)?.uid ?: "local"
+                repository.recordPlayedTrack(track, userId)
             }
         }
     }

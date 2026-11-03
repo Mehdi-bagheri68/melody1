@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,44 +20,60 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
+import com.example.data.auth.AuthState
 import com.example.data.model.AppLanguage
 import com.example.data.model.AudioQuality
 import com.example.data.model.Country
 import com.example.ui.AppStrings.tr
-import com.example.ui.LocalAppLanguage
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.AccentOrange
+import com.example.ui.theme.BorderHighlight
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.OledBackground
 import com.example.ui.theme.OledSurface
 import com.example.ui.theme.OledSurfaceHigh
+import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
@@ -73,144 +88,504 @@ fun SettingsScreen(
     onLanguageChanged: (AppLanguage) -> Unit,
     iranNoVpnMode: Boolean = true,
     onIranNoVpnModeChanged: (Boolean) -> Unit = {},
-    onClearCacheClick: () -> Unit = {}
+    onClearCacheClick: () -> Unit = {},
+    authState: AuthState = AuthState.SignedOut,
+    onSignInClick: () -> Unit = {},
+    onSignOutClick: () -> Unit = {},
+    onDeleteAccountClick: () -> Unit = {}
 ) {
-    val context = LocalContext.current
-    val lang = LocalAppLanguage.current
+    var cacheCleared by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            containerColor = OledSurfaceVariant,
+            title = {
+                Text(
+                    text = tr(appLanguage, "حذف دائمی حساب کاربری", "Delete Account Permanently"),
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = tr(
+                        appLanguage,
+                        "آیا از حذف دائمی حساب کاربری و تمام اطلاعات مرتبط مطمئن هستید؟ این عمل قابل بازگشت نیست.",
+                        "Are you sure you want to permanently delete your account and associated data? This action cannot be undone."
+                    ),
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        onDeleteAccountClick()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentOrange,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.testTag("confirm_delete_account_btn")
+                ) {
+                    Text(tr(appLanguage, "حذف دائمی", "Delete Permanently"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAccountDialog = false }) {
+                    Text(tr(appLanguage, "انصراف", "Cancel"), color = AccentGold)
+                }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(OledBackground)
             .statusBarsPadding(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(bottom = 130.dp)
     ) {
         item {
-            Text(
-                text = tr(lang, "تنظیمات و زبان برنامه", "Settings & Language"),
-                style = MaterialTheme.typography.headlineMedium,
-                color = TextPrimary,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = tr(
-                    lang,
-                    "تغییر زبان (فارسی راست‌به‌چپ / انگلیسی چپ‌به‌راست)، کشور، حالت شبکه و کیفیت پخش",
-                    "Customize language (Persian RTL / English LTR), region, network mode, and audio quality"
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
-            )
-        }
-
-        // Section: App Language (Bilingual FA RTL / EN LTR)
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Language,
-                    contentDescription = null,
-                    tint = AccentGold,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+            ) {
                 Text(
-                    text = tr(lang, "زبان و جهت نمایش برنامه (Language)", "App Language & Layout Direction"),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = AccentGold,
-                    fontWeight = FontWeight.Bold
+                    text = tr(appLanguage, "تنظیمات و شخصی‌سازی", "Settings & Preferences"),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = TextPrimary,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = tr(
+                        appLanguage,
+                        "مدیریت حساب کاربری، زبان برنامه، کشور، کیفیت پخش و اتصال مستقیم",
+                        "Manage account, language, country, streaming quality & direct mode"
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+        // Section 0: User Account Management (Email Auth)
+        item {
+            SettingsGroupTitle(
+                icon = Icons.Default.AccountCircle,
+                title = tr(appLanguage, "حساب کاربری (ایمیل)", "User Account (Email)")
+            )
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderHighlight, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant)
             ) {
-                AppLanguage.values().forEach { option ->
-                    val isSelected = option == appLanguage
-                    Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(
-                                width = if (isSelected) 2.dp else 1.dp,
-                                color = if (isSelected) AccentGold else BorderSubtle,
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .clickable { onLanguageChanged(option) }
-                            .testTag("lang_option_${option.code}"),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) OledSurfaceHigh else OledSurface
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    when (authState) {
+                        is AuthState.SignedIn -> {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = if (option == AppLanguage.FA) "🇮🇷 فارسی" else "🇬🇧 English",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = if (isSelected) AccentGold else TextPrimary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (isSelected) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = AccentGold,
-                                        modifier = Modifier.size(18.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(AccentGold),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = authState.displayName.take(2).uppercase().ifBlank { "MG" },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = authState.displayName.ifBlank { authState.email },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = authState.email,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = AccentGold
+                                    )
+                                }
+                                Surface(
+                                    color = Color(0x3300E676),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = tr(appLanguage, "فعال", "Active"),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF00E676),
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (option == AppLanguage.FA) {
-                                    tr(lang, "راست به چپ (RTL)", "Right-to-Left (RTL)")
-                                } else {
-                                    tr(lang, "چپ به راست (LTR)", "Left-to-Right (LTR)")
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary
-                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = onSignOutClick,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_sign_out_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Logout,
+                                        contentDescription = tr(appLanguage, "خروج از حساب", "Sign Out"),
+                                        tint = AccentGold,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(tr(appLanguage, "خروج از حساب", "Sign Out"))
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showDeleteAccountDialog = true },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentOrange),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_delete_account_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteForever,
+                                        contentDescription = tr(appLanguage, "حذف حساب", "Delete Account"),
+                                        tint = AccentOrange,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(tr(appLanguage, "حذف حساب", "Delete Account"))
+                                }
+                            }
+                        }
+
+                        else -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = tr(appLanguage, "ورود یا ثبت‌نام با ایمیل", "Sign In or Create Account"),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = tr(
+                                            appLanguage,
+                                            "برای ذخیره اختصاصی علاقه‌مندی‌ها و پلی‌لیست‌ها وارد شوید",
+                                            "Sign in to save your personal favorites and playlists"
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Button(
+                                    onClick = onSignInClick,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AccentGold,
+                                        contentColor = Color.Black
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("settings_sign_in_btn")
+                                ) {
+                                    Text(
+                                        text = tr(appLanguage, "ورود / ثبت‌نام", "Sign In"),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Section: Iran No-VPN Direct Streaming Mode (BUG-10)
+        // Section 1: App Language (فارسی / English with automatic RTL/LTR layout switch)
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Public,
-                    contentDescription = null,
-                    tint = AccentGold,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = tr(lang, "حالت شبکه و پخش بدون فیلترشکن (No-VPN)", "Iran No-VPN Direct Streaming Mode"),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = AccentGold,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+            SettingsGroupTitle(
+                icon = Icons.Default.Language,
+                title = tr(appLanguage, "زبان برنامه (App Language)", "App Language (زبان برنامه)")
+            )
 
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderHighlight, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    AppLanguage.entries.forEach { langOption ->
+                        val isSelected = langOption == appLanguage
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onLanguageChanged(langOption) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .testTag("lang_${langOption.code}"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { onLanguageChanged(langOption) },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = AccentGold,
+                                    unselectedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = langOption.displayName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (isSelected) AccentGold else TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (langOption == AppLanguage.FA)
+                                        tr(appLanguage, "چیدمان راست‌به‌چپ (RTL)", "Right-to-Left (RTL) Layout")
+                                    else
+                                        tr(appLanguage, "چیدمان چپ‌به‌راست (LTR)", "Left-to-Right (LTR) Layout"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextTertiary
+                                )
+                            }
+                            Surface(
+                                color = if (isSelected) AccentGold else OledSurfaceHigh,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = if (langOption == AppLanguage.FA) "فارسی 🇮🇷" else "EN 🌐",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isSelected) Color.Black else TextSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 2: Country & Region
+        item {
+            Spacer(modifier = Modifier.height(20.dp))
+            SettingsGroupTitle(
+                icon = Icons.Default.Public,
+                title = tr(appLanguage, "منطقه و کشور موسیقی", "Music Country & Region")
+            )
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onCountryChangeClick)
+                    .testTag("settings_country_card"),
+                colors = CardDefaults.cardColors(containerColor = OledSurface)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = selectedCountry.flag, fontSize = 34.sp)
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tr(
+                                appLanguage,
+                                "کشور فعلی: ${selectedCountry.nameFa}",
+                                "Current Country: ${selectedCountry.nameEn}"
+                            ),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = tr(appLanguage, "برای تغییر کشور و لیست ترندها ضربه بزنید", "Tap to change country & trending chart"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AccentGold
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section 3: Audio Quality
+        item {
+            Spacer(modifier = Modifier.height(20.dp))
+            SettingsGroupTitle(
+                icon = Icons.Default.HighQuality,
+                title = tr(appLanguage, "کیفیت پخش آنلاین و دانلود", "Streaming & Audio Quality")
+            )
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = OledSurface)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    AudioQuality.entries.forEach { quality ->
+                        val isSelected = quality == audioQuality
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onAudioQualityChanged(quality) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .testTag("quality_${quality.name}"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { onAudioQualityChanged(quality) },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = AccentGold,
+                                    unselectedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = quality.getLabel(appLanguage),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = if (isSelected) AccentGold else TextPrimary
+                                )
+                                Text(
+                                    text = tr(
+                                        appLanguage,
+                                        "نرخ بیت: ${quality.bitrate}",
+                                        "Bitrate: ${quality.bitrate}"
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextTertiary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 4: Playback & Direct No-VPN Connection Settings
+        item {
+            Spacer(modifier = Modifier.height(20.dp))
+            SettingsGroupTitle(
+                icon = Icons.Default.Equalizer,
+                title = tr(appLanguage, "تنظیمات اتصال بدون فیلترشکن", "Direct No-VPN & Playback")
+            )
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = OledSurface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Security,
+                                    contentDescription = tr(appLanguage, "پخش مستقیم بدون فیلترشکن", "Direct No-VPN Streaming"),
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = tr(appLanguage, "پخش مستقیم بدون فیلترشکن (ایران)", "Direct No-VPN Streaming (Iran)"),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = tr(
+                                    appLanguage,
+                                    "استفاده از سرورهای مستقیم داخلی و کاورهای آفلاین بدون نیاز به VPN",
+                                    "Uses direct unfiltered servers and bundled covers without VPN"
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = iranNoVpnMode,
+                            onCheckedChange = onIranNoVpnModeChanged,
+                            modifier = Modifier.testTag("switch_iran_no_vpn"),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = AccentGold
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section 5: Storage & Cache
+        item {
+            Spacer(modifier = Modifier.height(20.dp))
+            SettingsGroupTitle(
+                icon = Icons.Default.Storage,
+                title = tr(appLanguage, "حافظه و کش", "Storage & Cache")
+            )
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                    .clickable {
+                        onClearCacheClick()
+                        cacheCleared = true
+                    }
+                    .testTag("clear_cache_card"),
                 colors = CardDefaults.cardColors(containerColor = OledSurface)
             ) {
                 Row(
@@ -222,422 +597,54 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = tr(
-                                lang,
-                                "اتصال مستقیم به سرورهای داخل کشور (بدون نیاز به VPN)",
-                                "Direct Domestic CDN (No VPN Required)"
-                            ),
+                            text = if (cacheCleared)
+                                tr(appLanguage, "کش موقت پاکسازی شد!", "Temporary cache cleared!")
+                            else
+                                tr(appLanguage, "پاکسازی کش موقت جستجو و استریم", "Clear Search & Stream Cache"),
                             style = MaterialTheme.typography.titleSmall,
-                            color = TextPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = tr(
-                                lang,
-                                if (iranNoVpnMode) {
-                                    "فعال: فقط از سرورهای مستقیم و بدون فیلتر پخش کامل آهنگ انجام می‌شود و از سرورهای مسدود بین‌المللی استفاده نمی‌شود."
-                                } else {
-                                    "غیرفعال: در کنار سرورهای مستقیم، جستجو از سرورهای بین‌المللی (نیازمند اینترنت آزاد/VPN برای پیش‌نمایش) نیز فعال است."
-                                },
-                                if (iranNoVpnMode) {
-                                    "Enabled: Uses only direct unfiltered full-track servers and skips blocked international hosts."
-                                } else {
-                                    "Disabled: Also queries international iTunes servers alongside direct full-track hosts."
-                                }
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            lineHeight = 18.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Switch(
-                        checked = iranNoVpnMode,
-                        onCheckedChange = onIranNoVpnModeChanged,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.Black,
-                            checkedTrackColor = AccentGold
-                        ),
-                        modifier = Modifier.testTag("iran_no_vpn_switch")
-                    )
-                }
-            }
-        }
-
-        // Section: Country Preference
-        item {
-            Text(
-                text = tr(lang, "کشور و منطقه موسیقی", "Music Country & Region"),
-                style = MaterialTheme.typography.titleMedium,
-                color = AccentGold,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-                    .clickable(onClick = onCountryChangeClick)
-                    .testTag("settings_change_country"),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = selectedCountry.flag, fontSize = 32.sp)
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = selectedCountry.getDisplayName(lang),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary,
-                            fontWeight = FontWeight.Bold
+                            color = if (cacheCleared) AccentGold else TextPrimary
                         )
                         Text(
                             text = tr(
-                                lang,
-                                "برای تغییر کشور و فید خانه لمس کنید",
-                                "Tap to switch music country and home feed"
+                                appLanguage,
+                                "پلی‌لیست‌ها و علاقه‌مندی‌های شما حذف نمی‌شوند",
+                                "Your playlists and favorite tracks will be preserved"
                             ),
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
                     }
-                    Surface(
-                        color = OledSurfaceHigh,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            text = tr(lang, "تغییر", "Change"),
-                            color = AccentGold,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section: Audio Quality Selector (BUG-09 / UI-10)
-        item {
-            Text(
-                text = tr(lang, "کیفیت پخش و مصرف دیتا", "Streaming Quality & Data Usage"),
-                style = MaterialTheme.typography.titleMedium,
-                color = AccentGold,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = tr(
-                    lang,
-                    "در صورت پشتیبانی سرور از نسخه‌های 320kbps و 128kbps، کیفیت استریم به صورت هوشمند سوییچ می‌شود",
-                    "Automatically switches between 320kbps and 128kbps stream variants when available on the host"
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AudioQuality.values().forEach { quality ->
-                    val isSelected = quality == audioQuality
-
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .border(
-                                width = if (isSelected) 1.5.dp else 1.dp,
-                                color = if (isSelected) AccentGold else BorderSubtle,
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .clickable { onAudioQualityChanged(quality) }
-                            .testTag("quality_option_${quality.name}"),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) OledSurfaceHigh else OledSurface
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.HighQuality,
-                                contentDescription = null,
-                                tint = if (isSelected) AccentGold else TextTertiary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = quality.getTitle(lang),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = if (isSelected) AccentGold else TextPrimary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = quality.bitrate,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = AccentOrange
-                                    )
-                                }
-                                Text(
-                                    text = quality.getDescription(lang),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
-                            }
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = AccentGold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section: External Integrations & Background Audio
-        item {
-            Text(
-                text = tr(lang, "یکپارچه‌سازی و پخش در پس‌زمینه", "Background Playback & Integrations"),
-                style = MaterialTheme.typography.titleMedium,
-                color = AccentGold,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    FeatureStatusRow(
-                        icon = Icons.Default.Lock,
-                        title = tr(lang, "کنترل روی صفحه قفل و نوار اعلان", "Lock Screen & Notification Controls"),
-                        description = tr(
-                            lang,
-                            "پشتیبانی کامل از استاندارد MediaSession در تمام نسخه‌ها",
-                            "Full MediaSession support across all Android versions"
-                        )
-                    )
-                    FeatureStatusRow(
-                        icon = Icons.Default.Bluetooth,
-                        title = tr(lang, "پشتیبانی هدفون بلوتوث و هدست", "Bluetooth & Headset Controls"),
-                        description = tr(
-                            lang,
-                            "پاسخ فوری به کلیدهای پخش، مکث و جابجایی آهنگ",
-                            "Instant response to hardware play, pause, and skip keys"
-                        )
-                    )
-                    FeatureStatusRow(
-                        icon = Icons.Default.Headphones,
-                        title = tr(lang, "حالت خودرو و رانندگی ایمن", "Safe Car & Driving Mode"),
-                        description = tr(
-                            lang,
-                            "دسترسی سریع از بالای صفحه اصلی با کلیدهای بزرگ ویژه اتومبیل",
-                            "Quick access from the top header with oversized car controls"
-                        )
-                    )
-                }
-            }
-        }
-
-        // Section: Privacy & Free Public API Transparency
-        item {
-            Text(
-                text = tr(lang, "شفافیت APIهای رایگان و حریم خصوصی", "Privacy & Open Music APIs"),
-                style = MaterialTheme.typography.titleMedium,
-                color = AccentGold,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (cacheCleared) {
                         Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = null,
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = tr(appLanguage, "پاکسازی انجام شد", "Cache Cleared"),
                             tint = AccentGold
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = tr(lang, "احترام ۱۰۰٪ به حریم خصوصی کاربر", "100% User Privacy Protection"),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = TextPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = tr(
-                            lang,
-                            "اپلیکیشن MeloGroove هیچ داده شخصی، شماره تماس یا ردگیری تبلیغاتی انجام نمی‌دهد. تمامی آهنگ‌ها به صورت کامل (Full Track) استریم شده و علاقمندی‌ها در دستگاه شما نگهداری می‌شوند.",
-                            "MeloGroove collects zero personal data or ad tracking. All tracks stream in full length and your favorites and playlists are stored locally on your device."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        lineHeight = 20.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                onClearCacheClick()
-                                val msg = if (lang == AppLanguage.FA) {
-                                    "حافظه کش موقت و سلامت سرورها بازنشانی شد"
-                                } else {
-                                    "Temporary cache and host health reset successfully"
-                                }
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            }
-                            .testTag("clear_temp_cache_btn"),
-                        color = OledSurfaceHigh
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Default.CleaningServices, contentDescription = null, tint = AccentGold, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = tr(lang, "پاکسازی حافظه کش موقت", "Clear Temporary Cache"),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = TextPrimary
-                            )
-                        }
                     }
                 }
             }
         }
 
-        // Section: Complete Version History Documentation (v1.0.0 -> v1.5.0)
+        // Clean App Version Footer (Internal version topics/changelog removed from UI as requested)
         item {
-            Text(
-                text = tr(lang, "مستندات تاریخچه نسخه‌ها (VERSION_HISTORY.md)", "Version History & Changelog (v1.0.0 – v1.5.0)"),
-                style = MaterialTheme.typography.titleMedium,
-                color = AccentGold,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Card(
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    listOf(
-                        Triple(
-                            "v1.5.0 (Build 5) — نسخه فعلی",
-                            "• رفع کامل ۱۴ باگ فنی (BUG-01 تا BUG-14) و ۱۴ مورد UI/UX (UI-01 تا UI-14)\n• حذف کامل جایگزینی پنهان آهنگ نامعتبر با آهنگ پیش‌فرض دیگر و پیاده‌سازی SourceResolver اختصاصی\n• طبقه‌بندی هوشمند خطاهای شبکه و استریم (404/403/Timeout/429) با سقف تلاش مجدد (حداکثر ۶ بار Exponential Backoff) و دکمه تلاش مجدد دستی\n• اعتبارسنجی دقیق MediaItem پیش از Seek، جداسازی پارسر HTML با تشخیص ضدربات و نمایش واقعی زمان آهنگ (--:-- تا آماده شدن ExoPlayer)\n• همگام‌سازی Thread-Safe کش جستجو با کلید نرمال‌شده، لغو Jobهای قبلی при تغییر سریع کشور/مود، سوییچ واقعی کیفیت 320/128kbps و مستندات کامل رفع باگ‌ها",
-                            "Resolved all 14 technical bugs (BUG-01..14) and 14 UI/UX audit items (UI-01..14): removed silent song substitution, added error classification & bounded exponential backoff (max 6 retries) + manual retry, strict MediaItem seek verification, isolated MusicsFaHtmlParser with CAPTCHA detection, dynamic duration (--:-- until ready), Mutex-synchronized TTL cache, coroutine Job cancellation on rapid switches, and real 320/128kbps bitrate variant switching."
-                        ),
-                        Triple(
-                            "v1.4.0 (Build 4)",
-                            "• تفکیک کامل آهنگ‌ها و دسته‌بندی‌ها (Moods) بر اساس کشور انتخابی (ایران، ترکیه، آمریکا، بریتانیا، اسپانیا، فرانسه، آلمان)\n• رفع کامل قطع شدن پخش پس از ۱ دقیقه در پس‌زمینه و قفل صفحه با Foreground MediaSessionService و قفل سخت‌افزاری WakeLock / WifiLock\n• فعال‌سازی کامل دکمه‌های جلو/عقب بردن (Seek)، آهنگ بعدی و قبلی در نوار اعلان (Notification) و صفحه قفل (Lock Screen)",
-                            "Country-specific catalogs & categories, uninterrupted lock-screen/background playback, and full Notification & Lock Screen Seek/Next/Prev controls."
-                        ),
-                        Triple(
-                            "v1.3.0 (Build 3)",
-                            "• حذف موتور صدای آزمایشی و اتصال مستقیم ExoPlayer به سرورهای بدون فیلتر ایران (musics-fa و rozmusic) برای پخش کامل آهنگ‌های اصلی خوانندگان\n• تعبیه کاورهای اصلی آهنگ‌ها در داخل فایل نصبی (assets/covers) و کش ۱۰۰ مگابایتی برای نمایش تضمینی عکس آهنگ‌ها روی گوشی بدون نیاز به فیلترشکن",
-                            "Connected ExoPlayer directly to unfiltered full-length MP3 servers and bundled real photographic album covers locally for guaranteed No-VPN display."
-                        ),
-                        Triple(
-                            "v1.2.0 (Build 2)",
-                            "• ورود فوری به برنامه تنها با یک لمس روی کشور در صفحه اول (حذف دکمه اضافی شروع)\n• راست‌چین شدن (RTL) آنی در فریم صفر بدون پرش چپ به راست\n• افزودن شماره نسخه در هدر و تنظیمات برنامه",
-                            "Single-tap country onboarding, zero-frame RTL layout initialization, and version badge integration."
-                        ),
-                        Triple(
-                            "v1.1.0 (Build 1.1)",
-                            "• دوزبانه شدن کامل برنامه (فارسی راست‌به‌چپ و انگلیسی چپ‌به‌راست)\n• بازطراحی مدرن کارت‌های کشف و مودها به سبک رادیو جوان و اسپاتیفای + افزودن بخش «بروزترین‌ها» (۲۰۲۶ و ۲۰۲۵)\n• نمایش یکپارچه افقی (Carousel) برای بروزترین انتشارها، ترندها و اخیر شنیده‌ها\n• افزودن صفحه اختصاصی آرشیو کامل خواننده با مرتب‌سازی بر اساس ترند یا سال تولید، پخش خودکار لیست، تکرار یک آهنگ/گروه و دکمه توقف و حذف پخش",
-                            "Bilingual FA/EN RTL/LTR support, modern 2-column Explore & Moods cards, horizontal carousels for New Releases/Trending/Recent, Artist Discography screen, and Stop/Repeat modes."
-                        ),
-                        Triple(
-                            "v1.0.0 (Build 1 — نسخه اولیه)",
-                            "• ساخت اولیه اپلیکیشن موزیک پلیر آنلاین MeloGroove با معماری MVVM، Jetpack Compose، پایگاه داده محلی Room برای علاقه‌مندی‌ها، پلی‌لیست‌ها و تاریخچه پخش، حالت رانندگی ایمن و انتخاب کشور",
-                            "Initial release of MeloGroove with Clean MVVM architecture, Jetpack Compose OLED UI, Room database for Favorites/Playlists/History, Driving Mode, and Country Selection."
-                        )
-                    ).forEach { (ver, descFa, descEn) ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(OledSurfaceHigh)
-                                .padding(12.dp)
-                        ) {
-                            Text(
-                                text = ver,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = AccentGold,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = tr(lang, descFa, descEn),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
-                                lineHeight = 19.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // App Footer
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "MeloGroove Online Music Player v${com.example.BuildConfig.VERSION_NAME} (Build ${com.example.BuildConfig.VERSION_CODE})",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextTertiary
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = tr(appLanguage, "نسخه برنامه", "App Version"),
+                    tint = TextTertiary,
+                    modifier = Modifier.size(16.dp)
                 )
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = tr(
-                        lang,
-                        "طراحی شده با Jetpack Compose و Material Design 3",
-                        "Built with Jetpack Compose & Material Design 3"
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
+                    text = "MeloGroove v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.labelMedium,
                     color = TextTertiary
                 )
             }
@@ -646,39 +653,28 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun FeatureStatusRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    description: String
+private fun SettingsGroupTitle(
+    icon: ImageVector,
+    title: String
 ) {
-    Row(verticalAlignment = Alignment.Top) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(OledSurfaceHigh),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = AccentGold,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = TextPrimary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
-            )
-        }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = title,
+            tint = AccentGold,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = AccentGold,
+            fontWeight = FontWeight.Bold
+        )
     }
 }

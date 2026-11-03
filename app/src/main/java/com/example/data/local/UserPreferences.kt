@@ -74,11 +74,40 @@ class UserPreferences(context: Context) {
         _iranNoVpnMode.value = enabled
     }
 
+    // Auth session persistence (No-VPN compatible)
+    fun getCurrentUserUid(): String? = prefs.getString(KEY_AUTH_UID, null)
+    fun getCurrentUserEmail(): String? = prefs.getString(KEY_AUTH_EMAIL, null)
+    fun getCurrentUserDisplayName(): String = prefs.getString(KEY_AUTH_DISPLAY_NAME, "") ?: ""
+    fun isCurrentUserEmailVerified(): Boolean = prefs.getBoolean(KEY_AUTH_VERIFIED, false)
+
+    fun saveAuthSession(uid: String, email: String, displayName: String, emailVerified: Boolean) {
+        prefs.edit()
+            .putString(KEY_AUTH_UID, uid)
+            .putString(KEY_AUTH_EMAIL, email)
+            .putString(KEY_AUTH_DISPLAY_NAME, displayName)
+            .putBoolean(KEY_AUTH_VERIFIED, emailVerified)
+            .apply()
+    }
+
+    fun clearAuthSession() {
+        prefs.edit()
+            .remove(KEY_AUTH_UID)
+            .remove(KEY_AUTH_EMAIL)
+            .remove(KEY_AUTH_DISPLAY_NAME)
+            .remove(KEY_AUTH_VERIFIED)
+            .apply()
+    }
+
     companion object {
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_COUNTRY_CODE = "selected_country_code"
         private const val KEY_AUDIO_QUALITY = "audio_quality"
         private const val KEY_APP_LANGUAGE = "app_language"
         private const val KEY_IRAN_NO_VPN_MODE = "iran_no_vpn_mode"
+
+        private const val KEY_AUTH_UID = "auth_uid"
+        private const val KEY_AUTH_EMAIL = "auth_email"
+        private const val KEY_AUTH_DISPLAY_NAME = "auth_display_name"
+        private const val KEY_AUTH_VERIFIED = "auth_email_verified"
     }
 }

@@ -2,10 +2,11 @@ package com.example.data.repository
 
 import com.example.data.model.CountriesData
 import com.example.data.model.Track
+import com.example.util.IdGenerator
 import kotlin.math.abs
 
 /**
- * Isolated, resilient HTML parser for live Persian music search results (Fixes BUG-04 & BUG-05).
+ * Isolated, resilient HTML parser for live Persian music search results (Fixes BUG-04, BUG-05, N-07).
  *
  * Features:
  * - Detects anti-bot / CAPTCHA pages so callers can disable degraded sources gracefully.
@@ -14,6 +15,7 @@ import kotlin.math.abs
  * - Validates every extracted DTO before converting to [Track] (requires non-blank title, artist, and valid `.mp3` URL).
  * - Sets `durationMs = 0L` (unknown duration) instead of a fake hardcoded `215000L` (Fixes BUG-05), allowing Media3
  *   to populate the real duration once the stream is prepared.
+ * - Uses 64-bit deterministic SHA-256 ID via [IdGenerator.stable64BitId] instead of 32-bit `String.hashCode()` (Fixes N-07).
  */
 object MusicsFaHtmlParser {
 
@@ -129,23 +131,27 @@ object MusicsFaHtmlParser {
             else -> "2023"
         }
 
-        // Stable composite hash using both source ID ("musics_fa") and canonical MP3 URL (Fixes BUG-14)
-        val stableId = 1_000_000L + (abs("musics_fa:${dto.mp3Url}".hashCode().toLong()) % 900_000_000L)
+        // Fixes N-07 & BUG-14: 64-bit deterministic hash instead of 32-bit hashCode()
+        val stableId = IdGenerator.stable64BitId("musics_fa", dto.mp3Url, offset = 1_000_000L)
+        val artistId = Track.slugifyArtistId(artist)
+        val ownedArtwork = ArtworkResolver.buildOwnedArtworkOrNull(dto.artworkUrl ?: "", artistId)
 
         return Track(
             id = stableId,
             title = songTitle,
             artist = artist,
             album = "تک‌آهنگ ($year)",
-            artworkUrl = dto.artworkUrl ?: "",
+            artworkUrl = ownedArtwork?.url ?: "",
             previewUrl = dto.mp3Url,
             genre = "پاپ",
             durationMs = 0L, // Fixes BUG-05: Unknown duration until Media3 prepares the stream
             releaseYear = year,
             countryCode = countryCode,
             isFavorite = favoriteIds.contains(stableId),
-            playCount = 85000 + (abs(stableId.toInt()) % 35000),
-            sourceId = "musics_fa"
+            playCount = 85000 + (abs((stableId % 35000L).toInt())),
+            sourceId = "musics_fa",
+            artistId = artistId,
+            artwork = ownedArtwork
         )
     }
 

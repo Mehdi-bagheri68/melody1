@@ -1,0 +1,416 @@
+[
+  {
+    "id": "mohsen-chavoshi",
+    "nameFa": "محسن چاوشی",
+    "nameEn": "Mohsen Chavoshi",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1013.jpg",
+    "aliases": ["Mohsen Chavoshi", "محسن چاوشی"]
+  },
+  {
+    "id": "homayoun-shajarian",
+    "nameFa": "همایون شجریان",
+    "nameEn": "Homayoun Shajarian",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1015.jpg",
+    "aliases": ["Homayoun Shajarian", "همایون شجریان"]
+  },
+  {
+    "id": "sirvan-khosravi",
+    "nameFa": "سیروان خسروی",
+    "nameEn": "Sirvan Khosravi",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1016.jpg",
+    "aliases": ["Sirvan Khosravi", "سیروان خسروی"]
+  },
+  {
+    "id": "behnam-bani",
+    "nameFa": "بهنام بانی",
+    "nameEn": "Behnam Bani",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1017.jpg",
+    "aliases": ["Behnam Bani", "بهنام بانی"]
+  },
+  {
+    "id": "reza-bahram",
+    "nameFa": "رضا بهرام",
+    "nameEn": "Reza Bahram",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1023.jpg",
+    "aliases": ["Reza Bahram", "رضا بهرام"]
+  },
+  {
+    "id": "garsha-rezaei",
+    "nameFa": "گرشا رضایی",
+    "nameEn": "Garsha Rezaei",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1024.jpg",
+    "aliases": ["Garsha Rezaei", "گرشا رضایی"]
+  },
+  {
+    "id": "haamim",
+    "nameFa": "حامیم",
+    "nameEn": "Haamim",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1018.jpg",
+    "aliases": ["Haamim", "حامیم"]
+  },
+  {
+    "id": "majid-razavi",
+    "nameFa": "مجید رضوی",
+    "nameEn": "Majid Razavi",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1019.jpg",
+    "aliases": ["Majid Razavi", "مجید رضوی"]
+  },
+  {
+    "id": "fereydoun-asraei",
+    "nameFa": "فریدون آسرایی",
+    "nameEn": "Fereydoun Asraei",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1025.jpg",
+    "aliases": ["Fereydoun Asraei", "فریدون آسرایی"]
+  },
+  {
+    "id": "mohammadreza-shajarian",
+    "nameFa": "محمدرضا شجریان",
+    "nameEn": "MohammadReza Shajarian",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1006.jpg",
+    "aliases": ["MohammadReza Shajarian", "محمدرضا شجریان"]
+  },
+  {
+    "id": "erfan-tahmasbi",
+    "nameFa": "عرفان طهماسبی",
+    "nameEn": "Erfan Tahmasbi",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1014.jpg",
+    "aliases": ["Erfan Tahmasbi", "عرفان طهماسبی"]
+  },
+  {
+    "id": "alireza-ghorbani",
+    "nameFa": "علیرضا قربانی",
+    "nameEn": "Alireza Ghorbani",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1005.jpg",
+    "aliases": ["Alireza Ghorbani", "علیرضا قربانی"]
+  },
+  {
+    "id": "ali-lohrasbi",
+    "nameFa": "علی لهراسبی",
+    "nameEn": "Ali Lohrasbi",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1021.jpg",
+    "aliases": ["Ali Lohrasbi", "علی لهراسبی"]
+  },
+  {
+    "id": "mohsen-yeganeh",
+    "nameFa": "محسن یگانه",
+    "nameEn": "Mohsen Yeganeh",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1001.jpg",
+    "aliases": ["Mohsen Yeganeh", "محسن یگانه"]
+  },
+  {
+    "id": "ehsan-khajeh-amiri",
+    "nameFa": "احسان خواجه امیری",
+    "nameEn": "Ehsan Khajeh Amiri",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1020.jpg",
+    "aliases": ["Ehsan Khajeh Amiri", "احسان خواجه امیری"]
+  },
+  {
+    "id": "shadmehr-aghili",
+    "nameFa": "شادمهر عقیلی",
+    "nameEn": "Shadmehr Aghili",
+    "type": "SOLO",
+    "countryCode": "IR",
+    "imageUrl": "file:///android_asset/covers/cover_1022.jpg",
+    "aliases": ["Shadmehr Aghili", "شادمهر عقیلی"]
+  },
+  {
+    "id": "tarkan",
+    "nameFa": "تارکان",
+    "nameEn": "Tarkan",
+    "type": "SOLO",
+    "countryCode": "TR",
+    "imageUrl": null,
+    "aliases": ["Tarkan"]
+  },
+  {
+    "id": "ibrahim-tatlises",
+    "nameFa": "ابراهیم تاتلیسس",
+    "nameEn": "İbrahim Tatlıses",
+    "type": "SOLO",
+    "countryCode": "TR",
+    "imageUrl": null,
+    "aliases": ["İbrahim Tatlıses", "Ibrahim Tatlises"]
+  },
+  {
+    "id": "emrah",
+    "nameFa": "امراه",
+    "nameEn": "Emrah",
+    "type": "SOLO",
+    "countryCode": "TR",
+    "imageUrl": null,
+    "aliases": ["Emrah"]
+  },
+  {
+    "id": "ramil-sedali",
+    "nameFa": "رامیل سدالی",
+    "nameEn": "Ramil Sedali",
+    "type": "SOLO",
+    "countryCode": "TR",
+    "imageUrl": null,
+    "aliases": ["Ramil Sedali"]
+  },
+  {
+    "id": "mahsun-kirmizigul",
+    "nameFa": "ماهسون کیرمیزی‌گول",
+    "nameEn": "Mahsun Kırmızıgül",
+    "type": "SOLO",
+    "countryCode": "TR",
+    "imageUrl": null,
+    "aliases": ["Mahsun Kırmızıgül", "Mahsun"]
+  },
+  {
+    "id": "turkish-club-dj",
+    "nameFa": "کلاب ترکی",
+    "nameEn": "Turkish Club DJ",
+    "type": "BAND",
+    "countryCode": "TR",
+    "imageUrl": null,
+    "aliases": ["Turkish Club DJ"]
+  },
+  {
+    "id": "the-weeknd",
+    "nameFa": "د ویکند",
+    "nameEn": "The Weeknd",
+    "type": "SOLO",
+    "countryCode": "US",
+    "imageUrl": null,
+    "aliases": ["The Weeknd"]
+  },
+  {
+    "id": "dr-dre-snoop-dogg",
+    "nameFa": "دکتر دری و اسنوپ داگ",
+    "nameEn": "Dr. Dre & Snoop Dogg",
+    "type": "BAND",
+    "countryCode": "US",
+    "imageUrl": null,
+    "aliases": ["Dr. Dre & Snoop Dogg"]
+  },
+  {
+    "id": "boywithuke",
+    "nameFa": "بوی‌ویت‌یوک",
+    "nameEn": "BoyWithUke",
+    "type": "SOLO",
+    "countryCode": "US",
+    "imageUrl": null,
+    "aliases": ["BoyWithUke"]
+  },
+  {
+    "id": "eminem",
+    "nameFa": "امینم",
+    "nameEn": "Eminem",
+    "type": "SOLO",
+    "countryCode": "US",
+    "imageUrl": null,
+    "aliases": ["Eminem"]
+  },
+  {
+    "id": "rema-selena-gomez",
+    "nameFa": "رما و سلنا گومز",
+    "nameEn": "Rema & Selena Gomez",
+    "type": "BAND",
+    "countryCode": "US",
+    "imageUrl": null,
+    "aliases": ["Rema & Selena Gomez"]
+  },
+  {
+    "id": "sean-paul",
+    "nameFa": "شان پال",
+    "nameEn": "Sean Paul",
+    "type": "SOLO",
+    "countryCode": "US",
+    "imageUrl": null,
+    "aliases": ["Sean Paul"]
+  },
+  {
+    "id": "tiagz",
+    "nameFa": "تیاگز",
+    "nameEn": "Tiagz",
+    "type": "SOLO",
+    "countryCode": "US",
+    "imageUrl": null,
+    "aliases": ["Tiagz"]
+  },
+  {
+    "id": "ed-sheeran",
+    "nameFa": "اد شیرن",
+    "nameEn": "Ed Sheeran",
+    "type": "SOLO",
+    "countryCode": "GB",
+    "imageUrl": null,
+    "aliases": ["Ed Sheeran"]
+  },
+  {
+    "id": "bring-me-the-horizon",
+    "nameFa": "برینگ می د هورایزن",
+    "nameEn": "Bring Me The Horizon",
+    "type": "BAND",
+    "countryCode": "GB",
+    "imageUrl": null,
+    "aliases": ["Bring Me The Horizon"]
+  },
+  {
+    "id": "d-block-europe",
+    "nameFa": "دی‌بلاک یوروپ",
+    "nameEn": "D-Block Europe",
+    "type": "BAND",
+    "countryCode": "GB",
+    "imageUrl": null,
+    "aliases": ["D-Block Europe"]
+  },
+  {
+    "id": "sami-yusuf",
+    "nameFa": "سامی یوسف",
+    "nameEn": "Sami Yusuf",
+    "type": "SOLO",
+    "countryCode": "GB",
+    "imageUrl": null,
+    "aliases": ["Sami Yusuf"]
+  },
+  {
+    "id": "london-sessions",
+    "nameFa": "لندن سشنز",
+    "nameEn": "London Sessions",
+    "type": "COMPOSER",
+    "countryCode": "GB",
+    "imageUrl": null,
+    "aliases": ["London Sessions"]
+  },
+  {
+    "id": "gipsy-kings",
+    "nameFa": "جیپسی کینگز",
+    "nameEn": "Gipsy Kings",
+    "type": "BAND",
+    "countryCode": "ES",
+    "imageUrl": null,
+    "aliases": ["Gipsy Kings", "Gipsy Kings (France)"]
+  },
+  {
+    "id": "cris-mj",
+    "nameFa": "کریس ام‌جی",
+    "nameEn": "Cris MJ",
+    "type": "SOLO",
+    "countryCode": "ES",
+    "imageUrl": null,
+    "aliases": ["Cris MJ"]
+  },
+  {
+    "id": "antonio-banderas",
+    "nameFa": "آنتونیو باندراس",
+    "nameEn": "Antonio Banderas",
+    "type": "SOLO",
+    "countryCode": "ES",
+    "imageUrl": null,
+    "aliases": ["Antonio Banderas"]
+  },
+  {
+    "id": "koli-band",
+    "nameFa": "گروه کولی",
+    "nameEn": "Koli Band",
+    "type": "BAND",
+    "countryCode": "ES",
+    "imageUrl": null,
+    "aliases": ["Koli Band"]
+  },
+  {
+    "id": "spanish-guitar-masters",
+    "nameFa": "اساتید گیتار اسپانیا",
+    "nameEn": "Spanish Guitar Masters",
+    "type": "COMPOSER",
+    "countryCode": "ES",
+    "imageUrl": null,
+    "aliases": ["Spanish Guitar Masters"]
+  },
+  {
+    "id": "adriano-celentano",
+    "nameFa": "آدریانو چلنتانو",
+    "nameEn": "Adriano Celentano",
+    "type": "SOLO",
+    "countryCode": "FR",
+    "imageUrl": null,
+    "aliases": ["Adriano Celentano"]
+  },
+  {
+    "id": "paris-piano-acoustic",
+    "nameFa": "پیانو و آکوستیک پاریس",
+    "nameEn": "Paris Piano & Acoustic",
+    "type": "COMPOSER",
+    "countryCode": "FR",
+    "imageUrl": null,
+    "aliases": ["Paris Piano & Acoustic"]
+  },
+  {
+    "id": "french-touch-electro",
+    "nameFa": "فرنچ تاچ الکترو",
+    "nameEn": "French Touch Electro",
+    "type": "BAND",
+    "countryCode": "FR",
+    "imageUrl": null,
+    "aliases": ["French Touch Electro"]
+  },
+  {
+    "id": "modern-talking",
+    "nameFa": "مدرن تاکینگ",
+    "nameEn": "Modern Talking",
+    "type": "BAND",
+    "countryCode": "DE",
+    "imageUrl": null,
+    "aliases": ["Modern Talking"]
+  },
+  {
+    "id": "berlin-euro-electronic",
+    "nameFa": "برلین یورو الکترونیک",
+    "nameEn": "Berlin Euro Electronic",
+    "type": "BAND",
+    "countryCode": "DE",
+    "imageUrl": null,
+    "aliases": ["Berlin Euro Electronic"]
+  },
+  {
+    "id": "dekamond-piano",
+    "nameFa": "دکاموند پیانو",
+    "nameEn": "Dekamond Piano",
+    "type": "COMPOSER",
+    "countryCode": "DE",
+    "imageUrl": null,
+    "aliases": ["Dekamond Piano"]
+  },
+  {
+    "id": "german-guitar-sessions",
+    "nameFa": "گیتار سشنز آلمان",
+    "nameEn": "German Guitar Sessions",
+    "type": "COMPOSER",
+    "countryCode": "DE",
+    "imageUrl": null,
+    "aliases": ["German Guitar Sessions"]
+  }
+]

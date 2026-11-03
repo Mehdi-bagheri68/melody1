@@ -55,6 +55,8 @@ import com.example.ui.components.CreatePlaylistDialog
 import com.example.ui.components.FullPlayerSheet
 import com.example.ui.components.MiniPlayer
 import com.example.ui.screens.ArtistDetailScreen
+import com.example.ui.screens.AuthMode
+import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DrivingModeScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LibraryScreen
@@ -124,6 +126,11 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val selectedCountry by viewModel.selectedCountry.collectAsState()
     val appLanguage by viewModel.appLanguage.collectAsState()
     val iranNoVpnMode by viewModel.iranNoVpnMode.collectAsState()
+    val authState by viewModel.authState.collectAsState()
+    val isAuthLoading by viewModel.isAuthLoading.collectAsState()
+    val authErrorMessage by viewModel.authErrorMessage.collectAsState()
+    val authInfoMessage by viewModel.authInfoMessage.collectAsState()
+
     val trendingTracks by viewModel.trendingTracks.collectAsState()
     val newReleaseTracks by viewModel.newReleaseTracks.collectAsState()
     val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
@@ -168,6 +175,10 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val trackForPlaylist by viewModel.trackForPlaylist.collectAsState()
 
     val layoutDirection = if (appLanguage.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+    val isAuthScreen = currentScreen is Screen.Login ||
+        currentScreen is Screen.Register ||
+        currentScreen is Screen.ForgotPassword ||
+        currentScreen is Screen.VerifyEmail
 
     CompositionLocalProvider(
         LocalLayoutDirection provides layoutDirection,
@@ -185,6 +196,32 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                 onSelectAndProceed = { country ->
                     viewModel.completeOnboarding(country)
                 }
+            )
+        } else if (isAuthScreen) {
+            val authMode = when (currentScreen) {
+                is Screen.Register -> AuthMode.REGISTER
+                is Screen.ForgotPassword -> AuthMode.FORGOT_PASSWORD
+                is Screen.VerifyEmail -> AuthMode.VERIFY_EMAIL
+                else -> AuthMode.LOGIN
+            }
+            AuthScreen(
+                mode = authMode,
+                isLoading = isAuthLoading,
+                errorMessage = authErrorMessage,
+                infoMessage = authInfoMessage,
+                onModeChange = { newMode ->
+                    when (newMode) {
+                        AuthMode.LOGIN -> viewModel.navigateTo(Screen.Login)
+                        AuthMode.REGISTER -> viewModel.navigateTo(Screen.Register)
+                        AuthMode.FORGOT_PASSWORD -> viewModel.navigateTo(Screen.ForgotPassword)
+                        AuthMode.VERIFY_EMAIL -> viewModel.navigateTo(Screen.VerifyEmail)
+                    }
+                },
+                onLoginSubmit = { email, password -> viewModel.loginWithEmail(email, password) },
+                onRegisterSubmit = { email, password, name -> viewModel.registerWithEmail(email, password, name) },
+                onForgotPasswordSubmit = { email, newPass -> viewModel.resetPasswordWithEmail(email, newPass) },
+                onVerifyEmailSubmit = { code -> viewModel.verifyEmailCode(code) },
+                onContinueToHome = { viewModel.navigateTo(Screen.Home) }
             )
         } else {
             Scaffold(
@@ -219,7 +256,7 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                 )
                             }
 
-                            // Bottom Navigation Bar (Car / Driving mode removed from bottom bar as requested)
+                            // Bottom Navigation Bar
                             val navItems = listOf(
                                 NavItem(
                                     Screen.Home,
@@ -429,7 +466,11 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                 onLanguageChanged = { lang -> viewModel.setAppLanguage(lang) },
                                 iranNoVpnMode = iranNoVpnMode,
                                 onIranNoVpnModeChanged = { enabled -> viewModel.setIranNoVpnMode(enabled) },
-                                onClearCacheClick = { viewModel.clearTemporaryCache() }
+                                onClearCacheClick = { viewModel.clearTemporaryCache() },
+                                authState = authState,
+                                onSignInClick = { viewModel.navigateTo(Screen.Login) },
+                                onSignOutClick = { viewModel.signOut() },
+                                onDeleteAccountClick = { viewModel.deleteAccount() }
                             )
                         }
 

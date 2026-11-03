@@ -1,7 +1,18 @@
 # Changelog — MeloGroove Android Music Player
 
-All notable changes and audit bug fixes from `v1.0.0` to `v1.5.0` are documented here.
-See `VERSION_HISTORY.md` and `BUG_FIX_REPORT_v1.5.0.md` for full Persian & English technical reports.
+All notable changes and audit bug fixes from `v1.0.0` to `v1.6.0` are documented here.
+See `VERSION_HISTORY.md`, `BUG_FIX_REPORT_v1.6.0.md`, and `BUG_FIX_REPORT_v1.5.0.md` for full Persian & English technical reports.
+
+## [1.6.0] - 2026-11-02 (Build 6)
+### Added & Fixed (Architecture Roadmap & Audit N-01 to N-16, U-01 to U-12, Sections 5-8)
+- **N-01 / U-01 / U-02 / U-07:** Enforced strict 1-to-1 artwork ownership (`ArtworkResolver.BUNDLED_COVER_OWNERS`) across all 26 bundled covers (`cover_1001.jpg`..`cover_1027.jpg`). No track ever displays another artist's cover photo. Added deterministic two-tone artist monogram avatars (`ArtworkRef.Initials`) for unowned tracks and changed `TrackArtwork` image alignment to `Alignment.TopCenter`.
+- **N-02:** Removed artist cover photos from `MoodCategory` cards (`coverUrl = ""`) and rendered dedicated mood emblems in `ModernMoodCard`.
+- **N-03 / U-03 (Section 5):** Added `GroupEngine` (`GroupKind.SMART` and `GroupKind.CURATED`) with `perArtistCap = 1` on `new-releases` to guarantee artist diversity and eliminate consecutive single-artist flooding.
+- **N-04:** Externalized catalog definitions into `assets/catalog/artists.json`, `assets/catalog/groups.json`, and `assets/catalog/tracks.json` loaded via `CatalogDataSource`.
+- **N-06 / N-07 / N-14:** Added `IdGenerator.stable64BitId` (SHA-256 64-bit IDs replacing `String.hashCode()`) and upgraded `MeloGrooveDatabase` to version 4 with non-destructive `MIGRATION_3_4` + `fallbackToDestructiveMigrationOnDowngrade()`.
+- **Section 6 (No-VPN Email Auth):** Added `AuthRepository`, `LocalEmailAuthRepository`, `UserAccountEntity`, and `AuthScreen` (`Login`, `Register`, `ForgotPassword`, `VerifyEmail`) with salted SHA-256 hashing, rate-limit cooldown, sign-out, and account deletion in `SettingsScreen`.
+- **Settings UI Cleanup:** Removed internal per-version changelog topics from `SettingsScreen` so end-users only see clean user-facing settings.
+- **N-09 to N-13:** Added `network_security_config.xml`, configured `backup_rules.xml`, `data_extraction_rules.xml`, and `proguard-rules.pro`, and commented out unused Firebase dependencies in `app/build.gradle.kts`.
 
 ## [1.5.0] - 2026-11-02 (Build 5)
 ### Fixed (Technical Audit BUG-01 to BUG-14)

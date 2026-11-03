@@ -3,6 +3,8 @@ package com.example.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.MeloGrooveApp
+import com.example.data.auth.AuthResult
+import com.example.data.auth.AuthState
 import com.example.data.model.AppLanguage
 import com.example.data.model.ArtistSortOption
 import com.example.data.model.AudioQuality
@@ -26,6 +28,10 @@ import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String) {
     object Onboarding : Screen("onboarding")
+    object Login : Screen("login")
+    object Register : Screen("register")
+    object ForgotPassword : Screen("forgot_password")
+    object VerifyEmail : Screen("verify_email")
     object Home : Screen("home")
     object Search : Screen("search")
     object Library : Screen("library")
@@ -40,9 +46,20 @@ class MainViewModel : ViewModel() {
     private val app = MeloGrooveApp.instance
     private val repository = app.repository
     private val userPreferences = app.userPreferences
+    private val authRepository = app.authRepository
     private val playerController = app.playerController
 
     val appLanguage: StateFlow<AppLanguage> = userPreferences.appLanguage
+    val authState: StateFlow<AuthState> = authRepository.state
+
+    private val _isAuthLoading = MutableStateFlow(false)
+    val isAuthLoading: StateFlow<Boolean> = _isAuthLoading.asStateFlow()
+
+    private val _authErrorMessage = MutableStateFlow<String?>(null)
+    val authErrorMessage: StateFlow<String?> = _authErrorMessage.asStateFlow()
+
+    private val _authInfoMessage = MutableStateFlow<String?>(null)
+    val authInfoMessage: StateFlow<String?> = _authInfoMessage.asStateFlow()
 
     private val _currentScreen = MutableStateFlow<Screen>(
         if (userPreferences.onboardingCompleted.value) Screen.Home else Screen.Onboarding
@@ -59,7 +76,7 @@ class MainViewModel : ViewModel() {
     )
     val moodCategories: StateFlow<List<MoodCategory>> = _moodCategories.asStateFlow()
 
-    // Synchronously initialized on frame 0 so there is zero empty state or LTR/RTL layout jump
+    // Synchronously initialized on frame 0 via GroupEngine so there is zero empty state or LTR/RTL layout jump
     private val _trendingTracks = MutableStateFlow<List<Track>>(
         repository.getInitialTrendingSync(initialCountry)
     )
@@ -161,7 +178,7 @@ class MainViewModel : ViewModel() {
     private val _trackForPlaylist = MutableStateFlow<Track?>(null)
     val trackForPlaylist: StateFlow<Track?> = _trackForPlaylist.asStateFlow()
 
-    // Fixes BUG-08: Explicit coroutine Jobs for every async flow to cancel stale concurrent requests
+    // Explicit coroutine Jobs for every async flow to cancel stale concurrent requests
     private var trendingJob: Job? = null
     private var moodJob: Job? = null
     private var artistJob: Job? = null
@@ -170,6 +187,122 @@ class MainViewModel : ViewModel() {
 
     init {
         loadTrendingForCountry(_selectedCountry.value)
+    }
+
+    private fun currentUserId(): String =
+        (authState.value as? AuthState.SignedIn)?.uid ?: "local"
+
+    fun clearAuthMessages() {
+        _authErrorMessage.value = null
+        _authInfoMessage.value = null
+    }
+
+    fun loginWithEmail(email: String, password: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authInfoMessage.value = null
+            try {
+                when (val result = authRepository.signIn(email, password)) {
+                    is AuthResult.Success -> {
+                        _currentScreen.value = Screen.Home
+                    }
+                    is AuthResult.Failure -> {
+                        _authErrorMessage.value = result.reason.getMessage(appLanguage.value)
+                    }
+                }
+            } finally {
+                _isAuthLoading.value = false
+            }
+        }
+    }
+
+    fun registerWithEmail(email: String, password: String, displayName: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authInfoMessage.value = null
+            try {
+                when (val result = authRepository.signUp(email, password, displayName)) {
+                    is AuthResult.Success -> {
+                        _currentScreen.value = Screen.Home
+                    }
+                    is AuthResult.Failure -> {
+                        _authErrorMessage.value = result.reason.getMessage(appLanguage.value)
+                    }
+                }
+            } finally {
+                _isAuthLoading.value = false
+            }
+        }
+    }
+
+    fun resetPasswordWithEmail(email: String, newPassword: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authInfoMessage.value = null
+            try {
+                when (val result = authRepository.sendPasswordReset(email, newPassword)) {
+                    is AuthResult.Success -> {
+                        val lang = appLanguage.value
+                        _authInfoMessage.value = if (lang == AppLanguage.FA) {
+                            "رمز عبور با موفقیت تغییر یافت. اکنون وارد شوید."
+                        } else {
+                            "Password updated successfully. Please sign in."
+                        }
+                        _currentScreen.value = Screen.Login
+                    }
+                    is AuthResult.Failure -> {
+                        _authErrorMessage.value = result.reason.getMessage(appLanguage.value)
+                    }
+                }
+            } finally {
+                _isAuthLoading.value = false
+            }
+        }
+    }
+
+    fun verifyEmailCode(code: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            try {
+                val ok = authRepository.verifyEmailCode(code)
+                if (ok) {
+                    _currentScreen.value = Screen.Home
+                } else {
+                    val lang = appLanguage.value
+                    _authErrorMessage.value = if (lang == AppLanguage.FA) {
+                        "کد تأیید نامعتبر است"
+                    } else {
+                        "Invalid verification code"
+                    }
+                }
+            } finally {
+                _isAuthLoading.value = false
+            }
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            stopAndClearPlayback()
+            repository.clearSearchCache()
+            authRepository.signOut()
+            clearAuthMessages()
+            _currentScreen.value = Screen.Login
+        }
+    }
+
+    fun deleteAccount() {
+        viewModelScope.launch {
+            stopAndClearPlayback()
+            repository.clearSearchCache()
+            authRepository.deleteAccount()
+            clearAuthMessages()
+            _currentScreen.value = Screen.Login
+        }
     }
 
     fun setAppLanguage(language: AppLanguage) {
@@ -196,6 +329,7 @@ class MainViewModel : ViewModel() {
     }
 
     fun navigateTo(screen: Screen) {
+        clearAuthMessages()
         _currentScreen.value = screen
     }
 
@@ -213,7 +347,6 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    // Fixes BUG-08 & BUG-13: Cancels previous artistJob, checks parameter match, and resets _isLoadingArtist in finally
     private fun loadArtistTracks(artistName: String, sortOption: ArtistSortOption) {
         artistJob?.cancel()
         artistJob = viewModelScope.launch {
@@ -269,8 +402,6 @@ class MainViewModel : ViewModel() {
         loadTrendingForCountry(country)
     }
 
-    // Fixes BUG-07 & BUG-08: Activates _isLoadingTrending = true at start, cancels previous job,
-    // verifies country match before applying, and guarantees false in finally
     fun loadTrendingForCountry(country: Country) {
         trendingJob?.cancel()
         trendingJob = viewModelScope.launch {
@@ -298,7 +429,6 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    // Fixes BUG-08: Cancels previous moodJob and verifies active mood & country before setting results
     fun selectMood(mood: MoodCategory?) {
         moodJob?.cancel()
         _activeMood.value = mood
@@ -471,8 +601,7 @@ class MainViewModel : ViewModel() {
     fun toggleFavorite(track: Track) {
         viewModelScope.launch {
             try {
-                val isNowFav = repository.toggleFavorite(track)
-                // Also update in-memory lists immediately so heart icons respond in 0ms
+                val isNowFav = repository.toggleFavorite(track, currentUserId())
                 _trendingTracks.value = _trendingTracks.value.map {
                     if (it.id == track.id) it.copy(isFavorite = isNowFav) else it
                 }
@@ -499,7 +628,7 @@ class MainViewModel : ViewModel() {
         if (name.isBlank()) return
         viewModelScope.launch {
             try {
-                repository.createPlaylist(name, description)
+                repository.createPlaylist(name, description, currentUserId())
                 _isCreatePlaylistVisible.value = false
             } catch (e: Exception) {
                 AppLogger.w("createPlaylist", "Failed creating playlist", e)
