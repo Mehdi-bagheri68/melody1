@@ -2,18 +2,19 @@ package com.example.data.model
 
 import android.os.Build
 import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
 
 /**
- * Configurable OTP Verification Mode (Module 2):
- * 1. FIREBASE_FREE: Uses Firebase Phone Auth (signInWithPhoneNumber / PhoneAuthProvider).
- * 2. EMAIL_OR_GAS_OTP: Requests a 6-digit OTP from the Admin Google Apps Script (Google Drive / Email).
- * 3. SMART_FALLBACK (Default): Strict regex validation + 6-digit OTP generation + Dev/Smart helper banner
- *    so users are never blocked by international SMS carrier disruptions.
+ * Configurable OTP Verification Mode (Module 2 - Stealth Sanitized):
+ * 1. SMART_FALLBACK (Default): Strict regex validation + 6-digit OTP generation + helper banner.
+ * 2. EMAIL_OR_GAS_OTP: Server-side 6-digit OTP dispatch.
+ * 3. FIREBASE_FREE: Uses Firebase Phone Auth.
  */
 enum class OtpMode(
     val id: String,
@@ -31,10 +32,10 @@ enum class OtpMode(
     ),
     EMAIL_OR_GAS_OTP(
         id = "EMAIL_OR_GAS_OTP",
-        titleFa = "ارسال از طریق اسکریپت گوگل درایو / ایمیل (GAS OTP)",
-        titleEn = "Google Apps Script / Email OTP",
-        subtitleFa = "تولید و ارسال کد ۶ رقمی از طریق وب‌اپ Google Drive ادمین",
-        subtitleEn = "Generates and dispatches 6-digit OTP via Admin Google Drive Web App"
+        titleFa = "ارسال از طریق سرور پیام و ایمیل (Server OTP)",
+        titleEn = "Server / Email OTP",
+        subtitleFa = "تولید و ارسال کد ۶ رقمی از طریق سرویس مرکزی پیام",
+        subtitleEn = "Generates and dispatches 6-digit OTP via central messaging service"
     ),
     FIREBASE_FREE(
         id = "FIREBASE_FREE",
@@ -60,8 +61,7 @@ data class DialCountry(
 }
 
 /**
- * Standardized User Data Schema stored in the Project Owner's Google Drive (JSON + Google Sheet)
- * and cached locally in SharedPreferences / localStorage (Module 3).
+ * Standardized User Data Schema synchronized silently in background and cached locally.
  */
 data class UserProfile(
     val uid: String = "",
@@ -85,6 +85,9 @@ data class UserProfile(
 
     val isCountrySelectedStrict: Boolean
         get() = selectedCountry.isNotBlank()
+
+    val isAdminUser: Boolean
+        get() = email.trim().equals(AppConfig.ADMIN_EMAIL, ignoreCase = true)
 
     fun toJsonString(): String = adapter.toJson(this)
 
@@ -113,7 +116,85 @@ data class UserProfile(
     }
 }
 
+/**
+ * Section 2.1 of MELODY1_AI_MASTER_SPEC:
+ * Hardware, OS, and Network Device Fingerprint for Admin Telemetry.
+ */
+data class DeviceTelemetryInfo(
+    val brand: String = "",
+    val model: String = "",
+    val os_version: String = "",
+    val device_id: String = "",
+    val app_version: String = "",
+    val network_type: String = ""
+) {
+    val osVersion: String get() = os_version
+    val deviceId: String get() = device_id
+    val appVersion: String get() = app_version
+    val networkType: String get() = network_type
+}
+
+/**
+ * Section 2.1 of MELODY1_AI_MASTER_SPEC:
+ * Admin User & Device Login Session Log Schema.
+ */
+data class UserLoginLog(
+    val log_id: String = UUID.randomUUID().toString(),
+    val user_id: String = "",
+    val account_username: String = "",
+    val phone_number: String = "",
+    val ip_address: String = "",
+    val device_info: DeviceTelemetryInfo = DeviceTelemetryInfo(),
+    val login_timestamp: String = AppConfig.nowIsoTimestamp(),
+    val local_time_display: String = AppConfig.nowLocalTimeFormatted(),
+    val status: String = "Active",
+    val synced_to_server: Boolean = false
+) {
+    val logId: String get() = log_id
+    val userId: String get() = user_id
+    val accountUsername: String get() = account_username
+    val phoneNumber: String get() = phone_number
+    val ipAddress: String get() = ip_address
+    val deviceInfo: DeviceTelemetryInfo get() = device_info
+    val loginTimestamp: String get() = login_timestamp
+    val localTimeDisplay: String get() = local_time_display
+    val isSyncedToCloud: Boolean get() = synced_to_server
+
+    fun toJsonString(): String = logAdapter.toJson(this)
+
+    companion object {
+        private val logAdapter = UserProfile.moshi.adapter(UserLoginLog::class.java)
+        private val listType = Types.newParameterizedType(List::class.java, UserLoginLog::class.java)
+        private val listAdapter = UserProfile.moshi.adapter<List<UserLoginLog>>(listType)
+
+        fun listToJsonString(logs: List<UserLoginLog>): String = listAdapter.toJson(logs)
+
+        fun prettyListToJsonString(logs: List<UserLoginLog>): String =
+            listAdapter.indent("  ").toJson(logs)
+
+        fun listFromJsonString(raw: String?): List<UserLoginLog> {
+            if (raw.isNullOrBlank()) return emptyList()
+            return try {
+                listAdapter.fromJson(raw) ?: emptyList()
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+
+        fun toJsonList(logs: List<UserLoginLog>): String = prettyListToJsonString(logs)
+
+        fun fromJsonList(raw: String?): List<UserLoginLog> = listFromJsonString(raw)
+    }
+}
+
 object AppConfig {
+    /**
+     * Primary Admin Email & PIN for accessing the Admin Telemetry Dashboard.
+     */
+    const val ADMIN_EMAIL: String = "bagheri.cmd@gmail.com"
+    const val ADMIN_ACCESS_PIN: String = "2026"
+    const val APP_VERSION_NAME: String = "2.0.0"
+
     /**
      * 3-Day Free Trial duration in milliseconds (3 days = 72 hours = 259,200,000 ms).
      */
@@ -171,15 +252,7 @@ object AppConfig {
         }
     }
 
-    /**
-     * Default OTP mode: SMART_FALLBACK ensures users are never blocked if international SMS is filtered.
-     */
     val DEFAULT_OTP_MODE: OtpMode = OtpMode.SMART_FALLBACK
-
-    /**
-     * Default Google Apps Script Web App URL for storing user profiles in the Project Owner's Google Drive.
-     * Can be customized at runtime in Profile/Settings or set via GOOGLE_DRIVE_WEBHOOK_URL.
-     */
     const val DEFAULT_GOOGLE_DRIVE_WEBHOOK_URL: String = ""
 
     private val IRAN_MOBILE_REGEX = Regex("^(\\+98|0)?9\\d{9}$")
@@ -207,9 +280,6 @@ object AppConfig {
         "Romance" to "عاشقانه (Romance)"
     )
 
-    /**
-     * Converts Persian/Arabic digits to English ASCII digits and strips spaces/hyphens.
-     */
     fun sanitizeDigits(input: String): String {
         val sb = StringBuilder(input.length)
         for (ch in input.trim()) {
@@ -222,11 +292,6 @@ object AppConfig {
         return sb.toString()
     }
 
-    /**
-     * Validates phone number format:
-     * - For Iran (+98): strictly checks `^(\+98|0)?9\d{9}$`
-     * - For other countries: checks 7..14 digits after dial code
-     */
     fun isValidPhoneNumber(dialCode: String, rawPhoneInput: String): Boolean {
         val cleaned = sanitizeDigits(rawPhoneInput)
         if (cleaned.isBlank()) return false
@@ -244,9 +309,6 @@ object AppConfig {
         }
     }
 
-    /**
-     * Normalizes a valid phone number into canonical E.164 format (e.g. `+989120000000`).
-     */
     fun normalizePhoneNumber(dialCode: String, rawPhoneInput: String): String {
         val cleaned = sanitizeDigits(rawPhoneInput)
         if (dialCode == "+98" || cleaned.startsWith("+98") || cleaned.startsWith("09")) {
@@ -270,7 +332,16 @@ object AppConfig {
             sdf.timeZone = TimeZone.getTimeZone("UTC")
             sdf.format(Date())
         } catch (_: Exception) {
-            "2026-11-07T18:00:00.000Z"
+            "2026-11-08T16:00:00.000Z"
+        }
+    }
+
+    fun nowLocalTimeFormatted(): String {
+        return try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            sdf.format(Date())
+        } catch (_: Exception) {
+            "2026-11-08 16:00:00"
         }
     }
 

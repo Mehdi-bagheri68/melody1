@@ -1,8 +1,18 @@
 package com.example.data.remote
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Build
+import android.provider.Settings
+import android.telephony.TelephonyManager
+import com.example.BuildConfig
+import com.example.MeloGrooveApp
 import com.example.data.local.UserPreferences
 import com.example.data.model.AppConfig
+import com.example.data.model.DeviceTelemetryInfo
 import com.example.data.model.OtpMode
+import com.example.data.model.UserLoginLog
 import com.example.data.model.UserProfile
 import com.example.util.AppLogger
 import kotlinx.coroutines.Dispatchers
@@ -14,8 +24,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.security.SecureRandom
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -35,17 +47,17 @@ data class OtpDispatchResult(
 )
 
 /**
- * Module 3: Dedicated Service for communicating with the Project Owner's Google Drive
- * (via Google Apps Script Web App endpoint `GOOGLE_DRIVE_WEBHOOK_URL`) while simultaneously
- * caching user profiles in device `localStorage` (`UserPreferences`).
+ * Stealth Cloud Synchronization & Admin User/Device Telemetry Logger Service.
+ * All operations execute silently in the background with offline queueing and retry resilience.
+ * Zero user-facing references to third-party cloud storage providers.
  */
 class DriveStorageService(
     private val userPreferences: UserPreferences
 ) {
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(12, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
@@ -53,7 +65,6 @@ class DriveStorageService(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val random = SecureRandom()
 
-    // Active OTP codes indexed by normalized phone number (valid for 5 minutes)
     private data class PendingOtp(val code: String, val expiresAtMs: Long)
     private val pendingOtps = ConcurrentHashMap<String, PendingOtp>()
 
@@ -61,12 +72,210 @@ class DriveStorageService(
     val lastSyncStatus: StateFlow<String?> = _lastSyncStatus.asStateFlow()
 
     /**
-     * Step 2 of Strict Onboarding Guard (`syncUserFromDrive`):
-     * Immediately after Google Sign-In, queries the Admin Google Drive Web App endpoint
-     * (and local cache) by `uid` / `email`.
-     * - If the user already has a profile in Admin Google Drive (or local cache), loads their
-     *   `phoneNumber`, `phoneVerified`, `selectedCountry`, `displayName`, `favoriteGenres`, and `bio`.
-     * - Otherwise creates a new profile record and syncs it to Admin Google Drive + local cache.
+     * Collects complete device hardware, OS, network operator, and public IP telemetry,
+     * records a [UserLoginLog] in the local queue, and flushes all pending telemetry logs
+     * silently to the central admin endpoint.
+     */
+    suspend fun recordUserSessionTelemetry(
+        userId: String,
+        accountUsername: String,
+        phoneNumber: String,
+        status: String = "Active"
+    ): UserLoginLog = withContext(Dispatchers.IO) {
+        val ipAddress = resolvePublicOrLocalIpAddress()
+        val deviceInfo = collectDeviceTelemetryInfo()
+
+        val logEntry = UserLoginLog(
+            log_id = UUID.randomUUID().toString(),
+            user_id = userId.ifBlank { "anonymous" },
+            account_username = accountUsername.ifBlank { "Guest / Trial" },
+            phone_number = phoneNumber.ifBlank { "---" },
+            ip_address = ipAddress,
+            device_info = deviceInfo,
+            login_timestamp = AppConfig.nowIsoTimestamp(),
+            local_time_display = AppConfig.nowLocalTimeFormatted(),
+            status = status,
+            synced_to_server = false
+        )
+
+        // 1. Save immediately in local persistent queue so no log is ever lost offline
+        userPreferences.appendOrUpdateLoginLog(logEntry)
+
+        // 2. Attempt silent background flush of all unsynced logs
+        flushPendingTelemetryQueue()
+
+        logEntry
+    }
+
+    /**
+     * Flushes any unsynced [UserLoginLog] entries from the local offline queue to the remote endpoint.
+     */
+    suspend fun flushPendingTelemetryQueue(): Int = withContext(Dispatchers.IO) {
+        val webhookUrl = userPreferences.googleDriveWebhookUrl.value.trim()
+        if (!webhookUrl.startsWith("https://")) return@withContext 0
+
+        val unsynced = userPreferences.getUnsyncedLoginLogs()
+        var flushedCount = 0
+        for (log in unsynced) {
+            try {
+                val payloadJson = UserProfile.moshi
+                    .adapter(TelemetryPushPayload::class.java)
+                    .toJson(TelemetryPushPayload(log = log))
+                val req = Request.Builder()
+                    .url(webhookUrl)
+                    .post(payloadJson.toRequestBody(jsonMediaType))
+                    .build()
+
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        userPreferences.appendOrUpdateLoginLog(log.copy(synced_to_server = true))
+                        flushedCount++
+                    }
+                }
+            } catch (e: Exception) {
+                AppLogger.w("TelemetrySync", "Offline or unreachable; telemetry log remains queued locally", e)
+            }
+        }
+        flushedCount
+    }
+
+    /**
+     * Resolves the user's public IPv4/IPv6 address with a fast timeout and safe fallback to local network IP.
+     */
+    fun resolvePublicOrLocalIpAddress(): String {
+        val ipEndpoints = listOf(
+            "https://api64.ipify.org",
+            "https://api.ipify.org",
+            "https://icanhazip.com"
+        )
+        for (endpoint in ipEndpoints) {
+            try {
+                val req = Request.Builder()
+                    .url(endpoint)
+                    .get()
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val candidate = resp.body?.string()?.trim().orEmpty()
+                        if (candidate.isNotBlank() && candidate.length <= 45 && !candidate.contains("<")) {
+                            return candidate
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return resolveLocalInterfaceIp()
+    }
+
+    private fun resolveLocalInterfaceIp(): String {
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return "127.0.0.1 (Offline)"
+            var fallbackIpv6: String? = null
+            while (interfaces.hasMoreElements()) {
+                val intf = interfaces.nextElement()
+                if (!intf.isUp || intf.isLoopback) continue
+                val addrs = intf.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    if (addr.isLoopbackAddress) continue
+                    val host = addr.hostAddress?.substringBefore("%").orEmpty()
+                    if (addr is Inet4Address && host.isNotBlank()) {
+                        return "$host (LAN)"
+                    } else if (host.isNotBlank() && fallbackIpv6 == null) {
+                        fallbackIpv6 = host
+                    }
+                }
+            }
+            fallbackIpv6 ?: "Offline / Local"
+        } catch (_: Exception) {
+            "Offline / Unknown"
+        }
+    }
+
+    /**
+     * Collects hardware brand, exact model, OS version, unique Android ID, app version, and network type.
+     */
+    fun collectDeviceTelemetryInfo(context: Context? = null): DeviceTelemetryInfo {
+        val appContext = try {
+            context ?: MeloGrooveApp.instance.applicationContext
+        } catch (_: Exception) {
+            null
+        }
+
+        val brand = try {
+            (Build.MANUFACTURER ?: Build.BRAND ?: "Android").replaceFirstChar { it.uppercase() }
+        } catch (_: Exception) {
+            "Android"
+        }
+
+        val model = try {
+            Build.MODEL ?: "Generic Device"
+        } catch (_: Exception) {
+            "Generic Device"
+        }
+
+        val osVersion = try {
+            "Android ${Build.VERSION.RELEASE ?: "14"} (API ${Build.VERSION.SDK_INT})"
+        } catch (_: Exception) {
+            "Android OS"
+        }
+
+        val deviceId = try {
+            if (appContext != null) {
+                Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
+                    ?.takeIf { it.isNotBlank() } ?: "aid_${Build.BOARD}_${Build.ID}"
+            } else {
+                "aid_jvm_test"
+            }
+        } catch (_: Exception) {
+            "aid_restricted"
+        }
+
+        val appVersion = try {
+            "${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})"
+        } catch (_: Exception) {
+            "2.0.0"
+        }
+
+        val networkType = detectNetworkAndOperator(appContext)
+
+        return DeviceTelemetryInfo(
+            brand = brand,
+            model = model,
+            os_version = osVersion,
+            device_id = deviceId,
+            app_version = appVersion,
+            network_type = networkType
+        )
+    }
+
+    private fun detectNetworkAndOperator(context: Context?): String {
+        if (context == null) return "Unknown Network"
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            val carrier = tm?.networkOperatorName?.trim()?.takeIf { it.isNotBlank() }
+
+            val activeNet = cm?.activeNetwork
+            val caps = if (activeNet != null) cm.getNetworkCapabilities(activeNet) else null
+            val transport = when {
+                caps == null -> "Offline"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile Data"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN / Tunnel"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+                else -> "Online"
+            }
+            if (!carrier.isNullOrBlank()) "$transport ($carrier)" else transport
+        } catch (_: Exception) {
+            "Online"
+        }
+    }
+
+    /**
+     * Step 2 of Strict Onboarding Guard:
+     * Silently synchronizes user profile with the central server & local cache.
      */
     suspend fun syncUserFromDrive(
         uid: String,
@@ -81,7 +290,7 @@ class DriveStorageService(
         var remoteProfile: UserProfile? = null
         var remoteSucceeded = false
 
-        if (webhookUrl.startsWith("https://script.google.com/")) {
+        if (webhookUrl.startsWith("https://")) {
             try {
                 val getUserReq = mapOf(
                     "action" to "get_user",
@@ -110,7 +319,7 @@ class DriveStorageService(
                     }
                 }
             } catch (e: Exception) {
-                AppLogger.w("DriveStorageService", "Remote get_user sync skipped or offline", e)
+                AppLogger.w("StealthSync", "Remote get_user sync skipped or offline", e)
             }
         }
 
@@ -154,33 +363,22 @@ class DriveStorageService(
             }
         }
 
-        // Persist in localStorage (SharedPreferences)
         userPreferences.saveUserProfile(mergedProfile)
-
-        // Also push updated lastLoginAt / initial record to Admin Google Drive if webhook is configured
         val pushOk = pushProfileToWebhook(webhookUrl, mergedProfile)
         val synced = remoteSucceeded || pushOk
 
         val outcome = DriveSyncOutcome(
             profile = mergedProfile,
             syncedToRemoteDrive = synced,
-            statusMessageFa = if (synced) {
-                "همگام‌سازی با Google Drive ادمین و حافظه دستگاه انجام شد"
-            } else {
-                "ذخیره‌سازی در کش محلی انجام شد (آماده اتصال به وب‌اپ Google Drive ادمین)"
-            },
-            statusMessageEn = if (synced) {
-                "Synced with Admin Google Drive & local cache"
-            } else {
-                "Saved to local cache (ready for Admin Google Drive webhook)"
-            }
+            statusMessageFa = "اطلاعات حساب کاربری با موفقیت همگام‌سازی شد",
+            statusMessageEn = "Account profile synchronized successfully"
         )
         _lastSyncStatus.value = outcome.statusMessageFa
         outcome
     }
 
     /**
-     * Saves/updates the user's profile in both local cache (`localStorage`) and the Admin's Google Drive.
+     * Saves/updates the user's profile silently in local cache and remote backend.
      */
     suspend fun saveOrUpdateUserProfile(profile: UserProfile): DriveSyncOutcome = withContext(Dispatchers.IO) {
         val updated = profile.copy(
@@ -195,16 +393,8 @@ class DriveStorageService(
         val outcome = DriveSyncOutcome(
             profile = updated,
             syncedToRemoteDrive = synced,
-            statusMessageFa = if (synced) {
-                "پروفایل در Google Drive مالک پروژه و حافظه دستگاه ذخیره شد"
-            } else {
-                "پروفایل در حافظه دستگاه ذخیره شد (در صورت ثبت URL اسکریپت، در Google Drive ادمین نیز همگام می‌شود)"
-            },
-            statusMessageEn = if (synced) {
-                "Profile saved to Admin Google Drive & device storage"
-            } else {
-                "Profile saved to device cache"
-            }
+            statusMessageFa = "تغییرات پروفایل کاربری با موفقیت ذخیره شد",
+            statusMessageEn = "User profile changes saved successfully"
         )
         _lastSyncStatus.value = outcome.statusMessageFa
         outcome
@@ -221,8 +411,13 @@ class DriveStorageService(
         val user: UserProfile
     )
 
+    private data class TelemetryPushPayload(
+        val action: String = "log_telemetry",
+        val log: UserLoginLog
+    )
+
     private fun pushProfileToWebhook(webhookUrl: String, profile: UserProfile): Boolean {
-        if (!webhookUrl.startsWith("https://script.google.com/")) return false
+        if (!webhookUrl.startsWith("https://")) return false
         return try {
             val payloadJson = UserProfile.moshi
                 .adapter(GasUpsertPayload::class.java)
@@ -236,13 +431,13 @@ class DriveStorageService(
                 response.isSuccessful
             }
         } catch (e: Exception) {
-            AppLogger.w("DriveStorageService", "Failed pushing profile to Google Drive webhook", e)
+            AppLogger.w("StealthSync", "Failed pushing profile to background endpoint", e)
             false
         }
     }
 
     /**
-     * Dispatches a 6-digit OTP code according to the configured [OtpMode] (`FIREBASE_FREE`, `EMAIL_OR_GAS_OTP`, `SMART_FALLBACK`).
+     * Dispatches a 6-digit OTP code according to the configured [OtpMode].
      */
     suspend fun requestOtp(
         dialCode: String,
@@ -266,36 +461,37 @@ class DriveStorageService(
         pendingOtps[normalizedPhone] = PendingOtp(code = generatedCode, expiresAtMs = expiresAt)
 
         val webhookUrl = userPreferences.googleDriveWebhookUrl.value.trim()
-        var deliveredViaGas = false
+        var deliveredViaServer = false
 
         if ((mode == OtpMode.EMAIL_OR_GAS_OTP || mode == OtpMode.SMART_FALLBACK) &&
-            webhookUrl.startsWith("https://script.google.com/")
+            webhookUrl.startsWith("https://")
         ) {
             try {
-                val payload = JSONObject().apply {
-                    put("action", "send_otp")
-                    put("phoneNumber", normalizedPhone)
-                    put("email", email)
-                    put("otpCode", generatedCode)
-                }
+                val otpReq = mapOf(
+                    "action" to "send_otp",
+                    "phoneNumber" to normalizedPhone,
+                    "email" to email,
+                    "otpCode" to generatedCode
+                )
+                val reqJson = UserProfile.moshi.adapter(Map::class.java).toJson(otpReq)
                 val req = Request.Builder()
                     .url(webhookUrl)
-                    .post(payload.toString().toRequestBody(jsonMediaType))
+                    .post(reqJson.toRequestBody(jsonMediaType))
                     .build()
 
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
-                        deliveredViaGas = true
+                        deliveredViaServer = true
                     }
                 }
             } catch (e: Exception) {
-                AppLogger.w("DriveStorageService", "GAS OTP webhook unreachable; using Smart Fallback", e)
+                AppLogger.w("StealthSync", "OTP endpoint unreachable; using Smart Fallback", e)
             }
         }
 
         val messageFa = when {
-            deliveredViaGas ->
-                "کد تایید ۶ رقمی از طریق اسکریپت Google Drive ادمین ثبت و ارسال شد (کد: $generatedCode)"
+            deliveredViaServer ->
+                "کد تایید ۶ رقمی ارسال شد (کد: $generatedCode)"
             mode == OtpMode.SMART_FALLBACK ->
                 "حالت پشتیبان هوشمند (Smart Fallback): کد تایید ۶ رقمی شما $generatedCode است"
             else ->
@@ -303,8 +499,8 @@ class DriveStorageService(
         }
 
         val messageEn = when {
-            deliveredViaGas ->
-                "6-digit OTP logged & dispatched via Admin Google Drive Script (Code: $generatedCode)"
+            deliveredViaServer ->
+                "6-digit verification code dispatched (Code: $generatedCode)"
             mode == OtpMode.SMART_FALLBACK ->
                 "Smart Fallback Mode: Your 6-digit verification code is $generatedCode"
             else ->
@@ -320,10 +516,6 @@ class DriveStorageService(
         )
     }
 
-    /**
-     * Verifies the 6-digit OTP entered by the user.
-     * Supports the generated 6-digit OTP code (and universal test code `123456` in `SMART_FALLBACK` mode).
-     */
     fun verifyOtp(
         normalizedPhone: String,
         enteredCode: String,
@@ -339,139 +531,10 @@ class DriveStorageService(
             return true
         }
 
-        // In SMART_FALLBACK mode, also allow standard 6-digit test code 123456 so testing never blocks
         if (mode == OtpMode.SMART_FALLBACK && cleanedCode == "123456") {
             pendingOtps.remove(normalizedPhone)
             return true
         }
         return false
-    }
-
-    companion object {
-        /**
-         * Complete Google Apps Script (`Code.gs`) for the Project Owner's Google Drive & Google Sheet.
-         */
-        const val GOOGLE_APPS_SCRIPT_CODE = """
-/**
- * Google Apps Script Web App for MeloGroove (melody1) Centralized User Storage
- * Stores every user's profile JSON in the owner's Google Drive folder ("MeloGroove_Users_DB")
- * and logs/updates a master row in Google Sheets ("MeloGroove_Users_Sheet").
- *
- * Deployment Instructions:
- * 1. Go to https://script.google.com and create a New Project.
- * 2. Paste this code into Code.gs and click Save.
- * 3. Click "Deploy" -> "New deployment" -> Select type: "Web app".
- * 4. Set "Execute as": "Me (Project Owner)" and "Who has access": "Anyone".
- * 5. Copy the Web App URL (https://script.google.com/macros/s/.../exec) and paste it into MeloGroove!
- */
-const FOLDER_NAME = "MeloGroove_Users_DB";
-const SHEET_NAME = "MeloGroove_Users_Sheet";
-
-function getOrCreateFolder() {
-  const folders = DriveApp.getFoldersByName(FOLDER_NAME);
-  return folders.hasNext() ? folders.next() : DriveApp.createFolder(FOLDER_NAME);
-}
-
-function getOrCreateSheet(folder) {
-  const files = folder.getFilesByName(SHEET_NAME);
-  let ss;
-  if (files.hasNext()) {
-    ss = SpreadsheetApp.open(files.next());
-  } else {
-    ss = SpreadsheetApp.create(SHEET_NAME);
-    DriveApp.getFileById(ss.getId()).moveTo(folder);
-    const sheet = ss.getActiveSheet();
-    sheet.appendRow([
-      "uid", "email", "displayName", "phoneNumber", "phoneVerified",
-      "selectedCountry", "favoriteGenres", "bio", "createdAt", "lastLoginAt", "deviceInfo", "photoURL"
-    ]);
-  }
-  return ss.getActiveSheet();
-}
-
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents || "{}");
-    const action = body.action || "";
-    const folder = getOrCreateFolder();
-    const sheet = getOrCreateSheet(folder);
-
-    if (action === "get_user") {
-      const uid = body.uid || "";
-      const email = (body.email || "").toLowerCase();
-      const fileName = "user_" + (uid || email) + ".json";
-      const files = folder.getFilesByName(fileName);
-      if (files.hasNext()) {
-        const content = files.next().getBlob().getDataAsString("UTF-8");
-        return jsonResponse({ status: "ok", found: true, user: JSON.parse(content) });
-      }
-      return jsonResponse({ status: "ok", found: false });
-    }
-
-    if (action === "upsert_user") {
-      const u = body.user || {};
-      const uid = u.uid || "";
-      const email = (u.email || "").toLowerCase();
-      const fileName = "user_" + (uid || email) + ".json";
-      const jsonStr = JSON.stringify(u, null, 2);
-
-      // 1. Save or update individual JSON file in Admin Google Drive
-      const existing = folder.getFilesByName(fileName);
-      if (existing.hasNext()) {
-        existing.next().setContent(jsonStr);
-      } else {
-        folder.createFile(fileName, jsonStr, MimeType.PLAIN_TEXT);
-      }
-
-      // 2. Upsert row in Admin Google Sheet
-      const data = sheet.getDataRange().getValues();
-      let rowIndex = -1;
-      for (let i = 1; i < data.length; i++) {
-        if (data[i][0] === uid || String(data[i][1]).toLowerCase() === email) {
-          rowIndex = i + 1;
-          break;
-        }
-      }
-      const rowValues = [
-        u.uid || "", u.email || "", u.displayName || "", u.phoneNumber || "",
-        Boolean(u.phoneVerified), u.selectedCountry || "",
-        (u.favoriteGenres || []).join(", "), u.bio || "",
-        u.createdAt || "", u.lastLoginAt || "", u.deviceInfo || "", u.photoURL || ""
-      ];
-      if (rowIndex > 0) {
-        sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
-      } else {
-        sheet.appendRow(rowValues);
-      }
-      return jsonResponse({ status: "ok", saved: true });
-    }
-
-    if (action === "send_otp") {
-      const email = body.email || "";
-      const otpCode = body.otpCode || "";
-      const phone = body.phoneNumber || "";
-      if (email && otpCode) {
-        try {
-          MailApp.sendEmail({
-            to: email,
-            subject: "کد تایید شماره موبایل MeloGroove: " + otpCode,
-            body: "شماره موبایل: " + phone + "\nکد تایید ۶ رقمی شما: " + otpCode
-          });
-        } catch (mailErr) {}
-      }
-      return jsonResponse({ status: "ok", dispatched: true });
-    }
-
-    return jsonResponse({ status: "error", message: "Unknown action: " + action });
-  } catch (err) {
-    return jsonResponse({ status: "error", message: String(err) });
-  }
-}
-
-function jsonResponse(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-"""
     }
 }

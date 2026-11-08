@@ -358,6 +358,60 @@ class AuditFixesUnitTest {
         assertFalse(com.example.data.model.AppConfig.isTrialValid(startMs, threeDaysLater))
         assertEquals(0L, com.example.data.model.AppConfig.computeTrialRemainingMs(startMs, threeDaysLater))
     }
+
+    @Test
+    fun `v2_0_0 UserLoginLog and DeviceTelemetryInfo JSON serialization and stealth compliance`() {
+        val logEntry = com.example.data.model.UserLoginLog(
+            log_id = "log-uuid-001",
+            user_id = "google_998877",
+            account_username = "bagheri.cmd@gmail.com",
+            phone_number = "+989123456789",
+            ip_address = "185.143.232.10",
+            device_info = com.example.data.model.DeviceTelemetryInfo(
+                brand = "Samsung",
+                model = "SM-S928B",
+                os_version = "Android 15 (SDK 35)",
+                device_id = "a1b2c3d4e5f60011",
+                app_version = "2.0.0 (Build 10)",
+                network_type = "Wi-Fi (Irancell)"
+            ),
+            login_timestamp = "2026-11-08T16:30:00Z",
+            local_time_display = "2026-11-08 20:00:00",
+            status = "Active",
+            synced_to_server = true
+        )
+
+        val jsonList = com.example.data.model.UserLoginLog.toJsonList(listOf(logEntry))
+        assertTrue(jsonList.contains("185.143.232.10"))
+        assertTrue(jsonList.contains("SM-S928B"))
+        assertTrue(jsonList.contains("+989123456789"))
+
+        val parsedList = com.example.data.model.UserLoginLog.fromJsonList(jsonList)
+        assertEquals(1, parsedList.size)
+        val restored = parsedList.first()
+        assertEquals("log-uuid-001", restored.logId)
+        assertEquals("google_998877", restored.userId)
+        assertEquals("+989123456789", restored.phoneNumber)
+        assertEquals("185.143.232.10", restored.ipAddress)
+        assertEquals("Samsung", restored.deviceInfo.brand)
+        assertEquals("SM-S928B", restored.deviceInfo.model)
+        assertEquals("Android 15 (SDK 35)", restored.deviceInfo.osVersion)
+        assertEquals("a1b2c3d4e5f60011", restored.deviceInfo.deviceId)
+        assertEquals("Active", restored.status)
+
+        // Verify OtpMode titles/subtitles have zero mention of Google Drive or Apps Script (Stealth Rule)
+        com.example.data.model.OtpMode.entries.forEach { mode ->
+            val titleFa = mode.getTitle(com.example.data.model.AppLanguage.FA)
+            val titleEn = mode.getTitle(com.example.data.model.AppLanguage.EN)
+            val subFa = mode.getSubtitle(com.example.data.model.AppLanguage.FA)
+            val subEn = mode.getSubtitle(com.example.data.model.AppLanguage.EN)
+            assertFalse(titleFa.contains("Drive", ignoreCase = true) || titleFa.contains("درایو"))
+            assertFalse(titleEn.contains("Drive", ignoreCase = true))
+            assertFalse(subFa.contains("Drive", ignoreCase = true) || subFa.contains("درایو"))
+            assertFalse(subEn.contains("Drive", ignoreCase = true))
+        }
+    }
 }
+
 
 

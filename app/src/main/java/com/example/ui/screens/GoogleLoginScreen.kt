@@ -246,8 +246,8 @@ fun GoogleLoginScreen(
             Text(
                 text = tr(
                     lang,
-                    "پلتفرم استریم موسیقی آنلاین با همگام‌سازی ابری در Google Drive",
-                    "Online Music Streaming with Centralized Google Drive Sync"
+                    "پلتفرم استریم موسیقی آنلاین با همگام‌سازی هوشمند ابری",
+                    "Online Music Streaming with Smart Cloud Sync"
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
@@ -291,8 +291,8 @@ fun GoogleLoginScreen(
                     Text(
                         text = tr(
                             lang,
-                            "برای ورود به برنامه و بازیابی یا ایجاد پرونده کاربری شما در Google Drive، ابتدا با حساب جیمیل خود وارد شوید.",
-                            "Sign in with your Google account to sync or create your profile in Google Drive."
+                            "برای ورود به برنامه و بازیابی یا ایجاد پروفایل کاربری، ابتدا با حساب جیمیل خود وارد شوید.",
+                            "Sign in with your Google account to restore or create your user profile."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
@@ -345,8 +345,8 @@ fun GoogleLoginScreen(
                             Text(
                                 text = tr(
                                     lang,
-                                    "در حال ارتباط با گوگل و همگام‌سازی درایو...",
-                                    "Connecting to Google & syncing Drive..."
+                                    "در حال احراز هویت و همگام‌سازی حساب...",
+                                    "Authenticating & syncing account..."
                                 ),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp

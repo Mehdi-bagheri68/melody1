@@ -254,7 +254,7 @@ fun PhoneVerificationScreen(
                         text = if (!isOtpSentStep) {
                             tr(
                                 lang,
-                                "برای تکمیل پرونده کاربری در Google Drive و ورود به مرحله انتخاب کشور، شماره موبایل خود را وارد کنید.",
+                                "برای تکمیل پرونده کاربری و ورود به مرحله انتخاب کشور، شماره موبایل خود را وارد کنید.",
                                 "Enter your mobile number to verify your profile and proceed to Country Selection."
                             )
                         } else {
@@ -622,7 +622,7 @@ fun PhoneVerificationScreen(
                                     text = tr(
                                         lang,
                                         "تایید و ثبت در سیستم (Verify & Save)",
-                                        "Verify & Save to Google Drive"
+                                        "Verify & Save Profile"
                                     ),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp

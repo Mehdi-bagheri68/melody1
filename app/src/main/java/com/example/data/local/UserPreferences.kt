@@ -6,6 +6,7 @@ import com.example.data.model.AppConfig
 import com.example.data.model.AppLanguage
 import com.example.data.model.AudioQuality
 import com.example.data.model.OtpMode
+import com.example.data.model.UserLoginLog
 import com.example.data.model.UserProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -86,6 +87,47 @@ class UserPreferences(context: Context) {
                 AppConfig.isTrialValid(prefs.getLong(KEY_TRIAL_STARTED_AT_MS, 0L))
         )
     val isTrialSessionActive: StateFlow<Boolean> = _isTrialSessionActive.asStateFlow()
+
+    // Admin User & Device Login Telemetry Logs (v2.0.0 - Section 2.1)
+    private val _loginLogs =
+        MutableStateFlow(UserLoginLog.listFromJsonString(prefs.getString(KEY_ADMIN_LOGIN_LOGS_JSON, null)))
+    val loginLogs: StateFlow<List<UserLoginLog>> = _loginLogs.asStateFlow()
+
+    @Synchronized
+    fun appendOrUpdateLoginLog(log: UserLoginLog) {
+        try {
+            val current = _loginLogs.value.toMutableList()
+            val existingIdx = current.indexOfFirst { it.log_id == log.log_id }
+            if (existingIdx >= 0) {
+                current[existingIdx] = log
+            } else {
+                current.add(0, log)
+            }
+            val capped = current.take(250)
+            prefs.edit().putString(KEY_ADMIN_LOGIN_LOGS_JSON, UserLoginLog.listToJsonString(capped)).apply()
+            _loginLogs.value = capped
+        } catch (_: Exception) {
+        }
+    }
+
+    @Synchronized
+    fun markUserLogsLoggedOut(userId: String) {
+        try {
+            val updated = _loginLogs.value.map { entry ->
+                if (entry.user_id == userId && entry.status == "Active") {
+                    entry.copy(status = "LoggedOut", synced_to_server = false)
+                } else {
+                    entry
+                }
+            }
+            prefs.edit().putString(KEY_ADMIN_LOGIN_LOGS_JSON, UserLoginLog.listToJsonString(updated)).apply()
+            _loginLogs.value = updated
+        } catch (_: Exception) {
+        }
+    }
+
+    fun getUnsyncedLoginLogs(): List<UserLoginLog> =
+        _loginLogs.value.filter { !it.synced_to_server }
 
     /**
      * Starts a new 3-day trial (if never started) or resumes an existing 3-day trial if still valid.
@@ -205,6 +247,8 @@ class UserPreferences(context: Context) {
     }
 
     fun clearAuthSession() {
+        val prevUid = _userProfile.value?.uid ?: "trial_guest"
+        markUserLogsLoggedOut(prevUid)
         prefs.edit()
             .remove(KEY_ACTIVE_USER_PROFILE_JSON)
             .remove(KEY_AUTH_UID)
@@ -228,6 +272,7 @@ class UserPreferences(context: Context) {
         private const val KEY_ACTIVE_USER_PROFILE_JSON = "active_user_profile_json"
         private const val KEY_TRIAL_STARTED_AT_MS = "trial_started_at_ms"
         private const val KEY_TRIAL_SESSION_ACTIVE = "trial_session_active"
+        private const val KEY_ADMIN_LOGIN_LOGS_JSON = "admin_login_logs_json"
         private const val PREFIX_PROFILE_BY_UID = "cached_user_uid_"
         private const val PREFIX_PROFILE_BY_EMAIL = "cached_user_email_"
 

@@ -47,6 +47,7 @@ import com.example.ui.components.CreatePlaylistDialog
 import com.example.ui.components.FullPlayerSheet
 import com.example.ui.components.GlassyBottomNavBar
 import com.example.ui.components.MiniPlayer
+import com.example.ui.screens.AdminDashboardScreen
 import com.example.ui.screens.ArtistDetailScreen
 import com.example.ui.screens.DrivingModeScreen
 import com.example.ui.screens.GoogleLoginScreen
@@ -120,7 +121,7 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val authState by viewModel.authState.collectAsState()
     val authErrorMessage by viewModel.authErrorMessage.collectAsState()
 
-    // Strict Onboarding Guard & Google Drive Profile State (v1.8.0)
+    // Strict Onboarding Guard & User Profile State (v2.0.0)
     val userProfile by viewModel.userProfile.collectAsState()
     val otpMode by viewModel.otpMode.collectAsState()
     val googleDriveWebhookUrl by viewModel.googleDriveWebhookUrl.collectAsState()
@@ -129,6 +130,8 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val generatedFallbackOtp by viewModel.generatedFallbackOtp.collectAsState()
     val otpStatusBanner by viewModel.otpStatusBanner.collectAsState()
     val driveSyncStatusMessage by viewModel.driveSyncStatusMessage.collectAsState()
+    val loginLogs by viewModel.loginLogs.collectAsState()
+    val isAdminUnlocked by viewModel.isAdminUnlocked.collectAsState()
 
     // 3-Day Free Trial State (v1.9.0)
     val trialStartedAtMs by viewModel.trialStartedAtMs.collectAsState()
@@ -485,6 +488,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                     otpMode = otpMode,
                                     isSyncing = isSyncingDrive,
                                     syncStatusMessage = driveSyncStatusMessage,
+                                    isAdminUnlocked = isAdminUnlocked,
+                                    onUnlockAdminPin = { pin -> viewModel.unlockAdminPanel(pin) },
+                                    onOpenAdminDashboard = { viewModel.navigateTo(Screen.AdminDashboard) },
                                     onBack = { viewModel.navigateTo(Screen.Home) },
                                     onSaveProfile = { displayName, bio, genres ->
                                         viewModel.saveUserProfileDetails(displayName, bio, genres)
@@ -507,6 +513,18 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                 )
                             }
 
+                            is Screen.AdminDashboard -> {
+                                AdminDashboardScreen(
+                                    logs = loginLogs,
+                                    adminEndpointUrl = googleDriveWebhookUrl,
+                                    isSyncing = isSyncingDrive,
+                                    syncStatusMessage = driveSyncStatusMessage,
+                                    onRefreshLogs = { viewModel.refreshAdminTelemetryLogs() },
+                                    onSaveEndpointUrl = { url -> viewModel.setGoogleDriveWebhookUrl(url) },
+                                    onBackClick = { viewModel.navigateTo(Screen.Profile) }
+                                )
+                            }
+
                             is Screen.Settings -> {
                                 SettingsScreen(
                                     selectedCountry = selectedCountry,
@@ -523,6 +541,13 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                     isTrialActive = hasValidTrialAccess,
                                     trialRemainingMs = trialRemainingMs,
                                     onOpenProfileClick = { viewModel.navigateTo(Screen.Profile) },
+                                    onOpenAdminDashboardClick = {
+                                        if (isAdminUnlocked || activeProfile?.isAdminUser == true) {
+                                            viewModel.navigateTo(Screen.AdminDashboard)
+                                        } else {
+                                            viewModel.navigateTo(Screen.Profile)
+                                        }
+                                    },
                                     onSignInClick = { viewModel.navigateTo(Screen.Login) },
                                     onSignOutClick = { viewModel.signOut() },
                                     onDeleteAccountClick = { viewModel.deleteAccount() }

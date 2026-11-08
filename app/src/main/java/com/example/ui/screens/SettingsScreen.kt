@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Equalizer
@@ -34,8 +35,6 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -69,15 +68,16 @@ import com.example.data.model.UserProfile
 import com.example.ui.AppStrings.tr
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.AccentOrange
-import com.example.ui.theme.BorderHighlight
-import com.example.ui.theme.BorderSubtle
-import com.example.ui.theme.OledBackground
-import com.example.ui.theme.OledSurface
+import com.example.ui.theme.GlassTealGlow
+import com.example.ui.theme.GlassyActionButton
 import com.example.ui.theme.OledSurfaceHigh
 import com.example.ui.theme.OledSurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
+import com.example.ui.theme.UnifiedStyles
+import com.example.ui.theme.glassyCard
+import com.example.ui.theme.glassyIconOrb
 
 @Composable
 fun SettingsScreen(
@@ -95,6 +95,7 @@ fun SettingsScreen(
     isTrialActive: Boolean = false,
     trialRemainingMs: Long = 0L,
     onOpenProfileClick: () -> Unit = {},
+    onOpenAdminDashboardClick: () -> Unit = {},
     onSignInClick: () -> Unit = {},
     onSignOutClick: () -> Unit = {},
     onDeleteAccountClick: () -> Unit = {}
@@ -140,7 +141,7 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteAccountDialog = false }) {
-                    Text(tr(appLanguage, "انصراف", "Cancel"), color = AccentGold)
+                    Text(tr(appLanguage, "انصراف", "Cancel"), color = GlassTealGlow)
                 }
             }
         )
@@ -149,7 +150,7 @@ fun SettingsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(OledBackground)
+            .background(UnifiedStyles.screenBackgroundBrush())
             .statusBarsPadding(),
         contentPadding = PaddingValues(bottom = 130.dp)
     ) {
@@ -168,8 +169,8 @@ fun SettingsScreen(
                 Text(
                     text = tr(
                         appLanguage,
-                        "مدیریت پروفایل گوگل درایو، زبان برنامه، کشور، کیفیت پخش و اتصال مستقیم",
-                        "Manage Google Drive profile, language, country, streaming quality & direct mode"
+                        "مدیریت پروفایل کاربری، زبان برنامه، کشور، کیفیت پخش و اتصال مستقیم",
+                        "Manage user profile, language, country, streaming quality & direct mode"
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
@@ -177,20 +178,18 @@ fun SettingsScreen(
             }
         }
 
-        // Section 0: User Profile & Google Drive Sync
+        // Section 0: User Profile & Account
         item {
             SettingsGroupTitle(
                 icon = Icons.Default.AccountCircle,
-                title = tr(appLanguage, "پروفایل کاربری (گوگل + موبایل + درایو)", "User Profile (Google + OTP + Drive)")
+                title = tr(appLanguage, "پروفایل و حساب کاربری", "User Profile & Account")
             )
 
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderHighlight, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant)
+                    .glassyCard(cornerRadius = 20.dp, isHighlighted = true)
             ) {
                 Column(
                     modifier = Modifier
@@ -212,14 +211,13 @@ fun SettingsScreen(
                             Box(
                                 modifier = Modifier
                                     .size(50.dp)
-                                    .clip(CircleShape)
-                                    .background(AccentGold),
+                                    .glassyIconOrb(isSelected = true),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = activeName.take(2).uppercase().ifBlank { "MG" },
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = Color.Black,
+                                    color = Color.White,
                                     fontWeight = FontWeight.ExtraBold
                                 )
                             }
@@ -234,7 +232,7 @@ fun SettingsScreen(
                                 Text(
                                     text = activeEmail,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = AccentGold
+                                    color = GlassTealGlow
                                 )
                                 if (activePhone.isNotBlank()) {
                                     Text(
@@ -261,10 +259,10 @@ fun SettingsScreen(
                         Button(
                             onClick = onOpenProfileClick,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentGold,
-                                contentColor = Color.Black
+                                containerColor = Color(0xFF2E6B66),
+                                contentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("settings_open_profile_btn")
@@ -272,8 +270,8 @@ fun SettingsScreen(
                             Text(
                                 text = tr(
                                     appLanguage,
-                                    "ویرایش پروفایل کاربری و تنظیمات Google Drive",
-                                    "Edit User Profile & Google Drive Settings"
+                                    "مشاهده و ویرایش پروفایل کاربری",
+                                    "View & Edit User Profile"
                                 ),
                                 fontWeight = FontWeight.Bold
                             )
@@ -294,7 +292,7 @@ fun SettingsScreen(
                                 Icon(
                                     imageVector = Icons.Default.Logout,
                                     contentDescription = tr(appLanguage, "خروج از حساب", "Sign Out"),
-                                    tint = AccentGold,
+                                    tint = GlassTealGlow,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -372,28 +370,20 @@ fun SettingsScreen(
                                 Text(
                                     text = tr(
                                         appLanguage,
-                                        "برای همگام‌سازی دائمی پروفایل در Google Drive وارد شوید",
-                                        "Sign in to permanently sync your profile with Google Drive"
+                                        "برای همگام‌سازی خودکار پروفایل و علاقه‌مندی‌ها وارد شوید",
+                                        "Sign in to automatically sync your profile & preferences"
                                     ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary
                                 )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
-                            Button(
+                            GlassyActionButton(
+                                text = tr(appLanguage, "ورود گوگل", "Sign In"),
                                 onClick = onSignInClick,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = AccentGold,
-                                    contentColor = Color.Black
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.testTag("settings_sign_in_btn")
-                            ) {
-                                Text(
-                                    text = tr(appLanguage, "ورود گوگل", "Sign In"),
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                                height = 42.dp,
+                                testTag = "settings_sign_in_btn"
+                            )
                         }
                     }
                 }
@@ -408,13 +398,11 @@ fun SettingsScreen(
                 title = tr(appLanguage, "زبان برنامه (App Language)", "App Language (زبان برنامه)")
             )
 
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderHighlight, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant)
+                    .glassyCard(cornerRadius = 20.dp)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     AppLanguage.entries.forEach { langOption ->
@@ -432,7 +420,7 @@ fun SettingsScreen(
                                 selected = isSelected,
                                 onClick = { onLanguageChanged(langOption) },
                                 colors = RadioButtonDefaults.colors(
-                                    selectedColor = AccentGold,
+                                    selectedColor = GlassTealGlow,
                                     unselectedColor = TextSecondary
                                 )
                             )
@@ -441,7 +429,7 @@ fun SettingsScreen(
                                 Text(
                                     text = langOption.displayName,
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = if (isSelected) AccentGold else TextPrimary,
+                                    color = if (isSelected) GlassTealGlow else TextPrimary,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
@@ -454,13 +442,13 @@ fun SettingsScreen(
                                 )
                             }
                             Surface(
-                                color = if (isSelected) AccentGold else OledSurfaceHigh,
+                                color = if (isSelected) Color(0xFF2E6B66) else OledSurfaceHigh,
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
                                     text = if (langOption == AppLanguage.FA) "فارسی 🇮🇷" else "EN 🌐",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = if (isSelected) Color.Black else TextSecondary,
+                                    color = if (isSelected) Color.White else TextSecondary,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
@@ -479,15 +467,13 @@ fun SettingsScreen(
                 title = tr(appLanguage, "منطقه و کشور موسیقی", "Music Country & Region")
             )
 
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                    .glassyCard(cornerRadius = 20.dp)
                     .clickable(onClick = onCountryChangeClick)
-                    .testTag("settings_country_card"),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
+                    .testTag("settings_country_card")
             ) {
                 Row(
                     modifier = Modifier
@@ -511,7 +497,7 @@ fun SettingsScreen(
                         Text(
                             text = tr(appLanguage, "برای تغییر کشور و لیست ترندها ضربه بزنید", "Tap to change country & trending chart"),
                             style = MaterialTheme.typography.bodySmall,
-                            color = AccentGold
+                            color = GlassTealGlow
                         )
                     }
                 }
@@ -526,13 +512,11 @@ fun SettingsScreen(
                 title = tr(appLanguage, "کیفیت پخش آنلاین و دانلود", "Streaming & Audio Quality")
             )
 
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
+                    .glassyCard(cornerRadius = 20.dp)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     AudioQuality.entries.forEach { quality ->
@@ -550,7 +534,7 @@ fun SettingsScreen(
                                 selected = isSelected,
                                 onClick = { onAudioQualityChanged(quality) },
                                 colors = RadioButtonDefaults.colors(
-                                    selectedColor = AccentGold,
+                                    selectedColor = GlassTealGlow,
                                     unselectedColor = TextSecondary
                                 )
                             )
@@ -559,7 +543,7 @@ fun SettingsScreen(
                                 Text(
                                     text = quality.getLabel(appLanguage),
                                     style = MaterialTheme.typography.titleSmall,
-                                    color = if (isSelected) AccentGold else TextPrimary
+                                    color = if (isSelected) GlassTealGlow else TextPrimary
                                 )
                                 Text(
                                     text = tr(
@@ -585,13 +569,11 @@ fun SettingsScreen(
                 title = tr(appLanguage, "تنظیمات اتصال بدون فیلترشکن", "Direct No-VPN & Playback")
             )
 
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
+                    .glassyCard(cornerRadius = 20.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -604,7 +586,7 @@ fun SettingsScreen(
                                 Icon(
                                     imageVector = Icons.Default.Security,
                                     contentDescription = tr(appLanguage, "پخش مستقیم بدون فیلترشکن", "Direct No-VPN Streaming"),
-                                    tint = AccentGold,
+                                    tint = GlassTealGlow,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -630,8 +612,8 @@ fun SettingsScreen(
                             onCheckedChange = onIranNoVpnModeChanged,
                             modifier = Modifier.testTag("switch_iran_no_vpn"),
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.Black,
-                                checkedTrackColor = AccentGold
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF2E6B66)
                             )
                         )
                     }
@@ -647,18 +629,16 @@ fun SettingsScreen(
                 title = tr(appLanguage, "حافظه و کش", "Storage & Cache")
             )
 
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                    .glassyCard(cornerRadius = 20.dp)
                     .clickable {
                         onClearCacheClick()
                         cacheCleared = true
                     }
-                    .testTag("clear_cache_card"),
-                colors = CardDefaults.cardColors(containerColor = OledSurface)
+                    .testTag("clear_cache_card")
             ) {
                 Row(
                     modifier = Modifier
@@ -674,7 +654,7 @@ fun SettingsScreen(
                             else
                                 tr(appLanguage, "پاکسازی کش موقت جستجو و استریم", "Clear Search & Stream Cache"),
                             style = MaterialTheme.typography.titleSmall,
-                            color = if (cacheCleared) AccentGold else TextPrimary
+                            color = if (cacheCleared) GlassTealGlow else TextPrimary
                         )
                         Text(
                             text = tr(
@@ -690,14 +670,77 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = tr(appLanguage, "پاکسازی انجام شد", "Cache Cleared"),
-                            tint = AccentGold
+                            tint = GlassTealGlow
                         )
                     }
                 }
             }
         }
 
-        // Clean App Version Footer (Internal version topics/changelog removed from UI as requested)
+        // Section 6: Admin User & Device Telemetry Panel Shortcut
+        item {
+            Spacer(modifier = Modifier.height(20.dp))
+            SettingsGroupTitle(
+                icon = Icons.Default.AdminPanelSettings,
+                title = tr(appLanguage, "مدیریت و تله‌متری نشست‌ها", "Session & Device Telemetry")
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .glassyCard(cornerRadius = 20.dp)
+                    .clickable(onClick = onOpenAdminDashboardClick)
+                    .testTag("settings_admin_panel_btn")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .glassyIconOrb(isSelected = true),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AdminPanelSettings,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = tr(appLanguage, "پنل مدیریت و ردیابی نشست‌های کاربران", "Admin User & Device Telemetry Dashboard"),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = tr(
+                                    appLanguage,
+                                    "مشاهده آدرس IP، مدل دستگاه، شماره موبایل و تاریخچه ورود",
+                                    "Inspect IP address, device model, phone number & login logs"
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clean App Version Footer
         item {
             Spacer(modifier = Modifier.height(24.dp))
             Row(
@@ -738,14 +781,14 @@ private fun SettingsGroupTitle(
         Icon(
             imageVector = icon,
             contentDescription = title,
-            tint = AccentGold,
+            tint = GlassTealGlow,
             modifier = Modifier.size(20.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
-            color = AccentGold,
+            color = GlassTealGlow,
             fontWeight = FontWeight.Bold
         )
     }

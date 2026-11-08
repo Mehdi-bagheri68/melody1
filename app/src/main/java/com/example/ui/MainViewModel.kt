@@ -16,6 +16,7 @@ import com.example.data.model.PlaybackError
 import com.example.data.model.PlaybackMode
 import com.example.data.model.Playlist
 import com.example.data.model.Track
+import com.example.data.model.UserLoginLog
 import com.example.data.model.UserProfile
 import com.example.util.AppLogger
 import kotlinx.coroutines.CancellationException
@@ -33,6 +34,7 @@ sealed class Screen(val route: String) {
     object Login : Screen("login")
     object PhoneVerification : Screen("phone_verification")
     object Profile : Screen("profile")
+    object AdminDashboard : Screen("admin_dashboard")
     object Register : Screen("register")
     object ForgotPassword : Screen("forgot_password")
     object VerifyEmail : Screen("verify_email")
@@ -57,11 +59,17 @@ class MainViewModel : ViewModel() {
     val appLanguage: StateFlow<AppLanguage> = userPreferences.appLanguage
     val authState: StateFlow<AuthState> = authRepository.state
 
-    // Centralized User Profile & Google Drive Sync State (v1.8.0)
+    // Centralized User Profile & Background Sync State (v2.0.0)
     val userProfile: StateFlow<UserProfile?> = userPreferences.userProfile
     val otpMode: StateFlow<OtpMode> = userPreferences.otpMode
     val googleDriveWebhookUrl: StateFlow<String> = userPreferences.googleDriveWebhookUrl
     val onboardingCompleted: StateFlow<Boolean> = userPreferences.onboardingCompleted
+    val loginLogs: StateFlow<List<UserLoginLog>> = userPreferences.loginLogs
+
+    private val _isAdminUnlocked = MutableStateFlow(
+        userPreferences.userProfile.value?.isAdminUser == true
+    )
+    val isAdminUnlocked: StateFlow<Boolean> = _isAdminUnlocked.asStateFlow()
 
     // 3-Day Free Trial State (v1.9.0)
     val trialStartedAtMs: StateFlow<Long> = userPreferences.trialStartedAtMs
@@ -234,6 +242,66 @@ class MainViewModel : ViewModel() {
     init {
         loadTrendingForCountry(_selectedCountry.value)
         startTrialExpirationMonitor()
+        recordStartupTelemetryIfActive()
+    }
+
+    private fun recordStartupTelemetryIfActive() {
+        viewModelScope.launch {
+            val profile = userPreferences.userProfile.value
+            val trialActive = userPreferences.isTrialSessionActive.value &&
+                com.example.data.model.AppConfig.isTrialValid(userPreferences.trialStartedAtMs.value)
+
+            when {
+                profile != null && profile.isAuthenticated -> {
+                    if (profile.isAdminUser) {
+                        _isAdminUnlocked.value = true
+                    }
+                    driveStorageService.recordUserSessionTelemetry(
+                        userId = profile.uid,
+                        accountUsername = profile.email.ifBlank { profile.displayName },
+                        phoneNumber = profile.phoneNumber,
+                        status = "Active"
+                    )
+                }
+                trialActive -> {
+                    val trialId = "trial_${userPreferences.trialStartedAtMs.value}"
+                    driveStorageService.recordUserSessionTelemetry(
+                        userId = trialId,
+                        accountUsername = "3-Day Free Trial User",
+                        phoneNumber = "Trial (No Phone Required)",
+                        status = "Active"
+                    )
+                }
+                else -> {
+                    driveStorageService.flushPendingTelemetryQueue()
+                }
+            }
+        }
+    }
+
+    fun unlockAdminPanel(pin: String): Boolean {
+        val ok = pin.trim() == com.example.data.model.AppConfig.ADMIN_ACCESS_PIN ||
+            userPreferences.userProfile.value?.isAdminUser == true
+        if (ok) {
+            _isAdminUnlocked.value = true
+        }
+        return ok
+    }
+
+    fun refreshAdminTelemetryLogs() {
+        viewModelScope.launch {
+            _isSyncingDrive.value = true
+            try {
+                val flushed = driveStorageService.flushPendingTelemetryQueue()
+                _driveSyncStatusMessage.value = if (flushed > 0) {
+                    "$flushed رکورد جدید با موفقیت در پس‌زمینه همگام‌سازی شد."
+                } else {
+                    "تمامی لاگ‌های تله‌متری کاربران بروز هستند."
+                }
+            } finally {
+                _isSyncingDrive.value = false
+            }
+        }
     }
 
     private fun resolveInitialScreen(
@@ -293,6 +361,15 @@ class MainViewModel : ViewModel() {
 
         if (valid) {
             clearAuthMessages()
+            viewModelScope.launch {
+                val trialId = "trial_$startMs"
+                driveStorageService.recordUserSessionTelemetry(
+                    userId = trialId,
+                    accountUsername = "3-Day Free Trial User",
+                    phoneNumber = "Trial (No Phone Required)",
+                    status = "Active"
+                )
+            }
             _currentScreen.value = if (userPreferences.onboardingCompleted.value) {
                 Screen.Home
             } else {
@@ -363,13 +440,22 @@ class MainViewModel : ViewModel() {
                 }
 
                 // Strict Onboarding Guard routing
+                if (syncedProfile.isAdminUser) {
+                    _isAdminUnlocked.value = true
+                }
+                driveStorageService.recordUserSessionTelemetry(
+                    userId = syncedProfile.uid,
+                    accountUsername = syncedProfile.email.ifBlank { syncedProfile.displayName },
+                    phoneNumber = syncedProfile.phoneNumber,
+                    status = "Active"
+                )
                 _currentScreen.value = when {
                     !syncedProfile.isPhoneVerifiedStrict -> Screen.PhoneVerification
                     !syncedProfile.isCountrySelectedStrict -> Screen.Onboarding
                     else -> Screen.Home
                 }
             } catch (e: Exception) {
-                AppLogger.w("onGoogleSignedIn", "Error syncing user profile from Drive", e)
+                AppLogger.w("onGoogleSignedIn", "Error syncing user profile", e)
                 _authErrorMessage.value = e.localizedMessage
             } finally {
                 _isSyncingDrive.value = false
@@ -463,6 +549,12 @@ class MainViewModel : ViewModel() {
                     phoneVerified = true
                 )
                 val outcome = driveStorageService.saveOrUpdateUserProfile(updated)
+                driveStorageService.recordUserSessionTelemetry(
+                    userId = outcome.profile.uid,
+                    accountUsername = outcome.profile.email.ifBlank { outcome.profile.displayName },
+                    phoneNumber = outcome.profile.phoneNumber,
+                    status = "Active"
+                )
                 _generatedFallbackOtp.value = null
                 _otpStatusBanner.value = null
                 _driveSyncStatusMessage.value = if (appLanguage.value == AppLanguage.FA) {
@@ -603,6 +695,8 @@ class MainViewModel : ViewModel() {
 
     fun signOut() {
         viewModelScope.launch {
+            val uid = currentUserId()
+            userPreferences.markUserLogsLoggedOut(uid)
             stopAndClearPlayback()
             repository.clearSearchCache()
             authRepository.signOut()
@@ -616,6 +710,8 @@ class MainViewModel : ViewModel() {
 
     fun deleteAccount() {
         viewModelScope.launch {
+            val uid = currentUserId()
+            userPreferences.markUserLogsLoggedOut(uid)
             stopAndClearPlayback()
             repository.clearSearchCache()
             authRepository.deleteAccount()
