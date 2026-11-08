@@ -231,6 +231,37 @@ class UserPreferences(context: Context) {
         return null
     }
 
+    // Privacy & Telemetry Consent (Section 4.3 — default false until user opts in)
+    private val _telemetryConsentGranted =
+        MutableStateFlow(prefs.getBoolean(KEY_TELEMETRY_CONSENT_GRANTED, false))
+    val telemetryConsentGranted: StateFlow<Boolean> = _telemetryConsentGranted.asStateFlow()
+
+    fun setTelemetryConsentGranted(granted: Boolean) {
+        prefs.edit().putBoolean(KEY_TELEMETRY_CONSENT_GRANTED, granted).apply()
+        _telemetryConsentGranted.value = granted
+        if (!granted) {
+            clearTelemetryLogs()
+        }
+    }
+
+    @Synchronized
+    fun clearTelemetryLogs() {
+        prefs.edit().remove(KEY_ADMIN_LOGIN_LOGS_JSON).apply()
+        _loginLogs.value = emptyList()
+    }
+
+    /**
+     * Returns an app-scoped, rotatable pseudonymous installation identifier (never hardware ANDROID_ID).
+     */
+    @Synchronized
+    fun getOrCreateInstallationId(): String {
+        val existing = prefs.getString(KEY_INSTALLATION_ID, null)
+        if (!existing.isNullOrBlank()) return existing
+        val generated = "inst_" + java.util.UUID.randomUUID().toString().replace("-", "").take(12)
+        prefs.edit().putString(KEY_INSTALLATION_ID, generated).apply()
+        return generated
+    }
+
     fun getCurrentUserUid(): String? = _userProfile.value?.uid ?: prefs.getString(KEY_AUTH_UID, null)
     fun getCurrentUserEmail(): String? = _userProfile.value?.email ?: prefs.getString(KEY_AUTH_EMAIL, null)
     fun getCurrentUserDisplayName(): String =
@@ -255,6 +286,7 @@ class UserPreferences(context: Context) {
             .remove(KEY_AUTH_EMAIL)
             .remove(KEY_AUTH_DISPLAY_NAME)
             .remove(KEY_AUTH_VERIFIED)
+            .remove(KEY_INSTALLATION_ID)
             .putBoolean(KEY_TRIAL_SESSION_ACTIVE, false)
             .apply()
         _userProfile.value = null
@@ -273,6 +305,8 @@ class UserPreferences(context: Context) {
         private const val KEY_TRIAL_STARTED_AT_MS = "trial_started_at_ms"
         private const val KEY_TRIAL_SESSION_ACTIVE = "trial_session_active"
         private const val KEY_ADMIN_LOGIN_LOGS_JSON = "admin_login_logs_json"
+        private const val KEY_TELEMETRY_CONSENT_GRANTED = "telemetry_consent_granted"
+        private const val KEY_INSTALLATION_ID = "pseudonymous_installation_id"
         private const val PREFIX_PROFILE_BY_UID = "cached_user_uid_"
         private const val PREFIX_PROFILE_BY_EMAIL = "cached_user_email_"
 

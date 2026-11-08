@@ -60,6 +60,15 @@ data class DialCountry(
         if (lang == AppLanguage.FA) "$flag $nameFa (\u200E$dialCode)" else "$flag $nameEn ($dialCode)"
 }
 
+enum class OtpVerificationStatus {
+    VERIFIED,
+    INVALID_FORMAT,
+    RATE_LIMITED,
+    MAX_ATTEMPTS_EXCEEDED,
+    EXPIRED_OR_INVALID,
+    BLOCKED_NO_BACKEND
+}
+
 /**
  * Standardized User Data Schema synchronized silently in background and cached locally.
  */
@@ -70,6 +79,7 @@ data class UserProfile(
     val photoURL: String = "",
     val phoneNumber: String = "",
     val phoneVerified: Boolean = false,
+    val phoneVerificationBypassedNoBackend: Boolean = false,
     val selectedCountry: String = "",
     val favoriteGenres: List<String> = listOf("Pop", "Traditional"),
     val bio: String = "",
@@ -83,11 +93,18 @@ data class UserProfile(
     val isPhoneVerifiedStrict: Boolean
         get() = phoneVerified && phoneNumber.isNotBlank()
 
+    /**
+     * Allows proceeding past the phone onboarding step either when the phone is genuinely verified
+     * OR when the user explicitly acknowledges `BLOCKED_NO_BACKEND` (while keeping `phoneVerified = false`).
+     */
+    val canProceedPastPhoneStep: Boolean
+        get() = isPhoneVerifiedStrict || phoneVerificationBypassedNoBackend
+
     val isCountrySelectedStrict: Boolean
         get() = selectedCountry.isNotBlank()
 
     val isAdminUser: Boolean
-        get() = email.trim().equals(AppConfig.ADMIN_EMAIL, ignoreCase = true)
+        get() = isAuthenticated && email.trim().equals(AppConfig.ADMIN_EMAIL, ignoreCase = true)
 
     fun toJsonString(): String = adapter.toJson(this)
 
@@ -117,8 +134,7 @@ data class UserProfile(
 }
 
 /**
- * Section 2.1 of MELODY1_AI_MASTER_SPEC:
- * Hardware, OS, and Network Device Fingerprint for Admin Telemetry.
+ * Section 4.3: Privacy-safe, consent-gated Device Telemetry Info.
  */
 data class DeviceTelemetryInfo(
     val brand: String = "",
@@ -135,7 +151,6 @@ data class DeviceTelemetryInfo(
 }
 
 /**
- * Section 2.1 of MELODY1_AI_MASTER_SPEC:
  * Admin User & Device Login Session Log Schema.
  */
 data class UserLoginLog(
@@ -189,11 +204,14 @@ data class UserLoginLog(
 
 object AppConfig {
     /**
-     * Primary Admin Email & PIN for accessing the Admin Telemetry Dashboard.
+     * Section 4.2: Admin Dashboard access is strictly bound to authenticated owner identity (`ADMIN_EMAIL`).
+     * Hardcoded client-side PIN (`2026`) has been removed per security audit.
      */
     const val ADMIN_EMAIL: String = "bagheri.cmd@gmail.com"
-    const val ADMIN_ACCESS_PIN: String = "2026"
     const val APP_VERSION_NAME: String = "2.0.0"
+    const val OTP_EXPIRY_MS: Long = 5L * 60L * 1000L
+    const val OTP_RESEND_COOLDOWN_MS: Long = 60L * 1000L
+    const val OTP_MAX_ATTEMPTS: Int = 5
 
     /**
      * 3-Day Free Trial duration in milliseconds (3 days = 72 hours = 259,200,000 ms).

@@ -411,7 +411,177 @@ class AuditFixesUnitTest {
             assertFalse(subEn.contains("Drive", ignoreCase = true))
         }
     }
+
+    @Test
+    fun `Section 2_2 DatePrecision never fabricates month-day and ranks full-date releases above year-only`() {
+        val yearOnlyTrack = Track(
+            id = 1001L,
+            title = "Catalog Song",
+            artist = "Mohsen Chavoshi",
+            album = "Single",
+            artworkUrl = "",
+            previewUrl = "https://ups.musics-fa.com/tagdl/1403/Track1.mp3",
+            releaseYear = "2026",
+            releaseDateIso = "2026",
+            datePrecision = com.example.data.model.DatePrecision.YEAR
+        )
+        val fullDateTrack = Track(
+            id = 2002L,
+            title = "Live Provider Song",
+            artist = "Sirvan Khosravi",
+            album = "Single",
+            artworkUrl = "",
+            previewUrl = "https://audio-ssl.itunes.apple.com/itunes-assets/Track2.m4a",
+            releaseYear = "2026",
+            releaseDateIso = "2026-03-15",
+            datePrecision = com.example.data.model.DatePrecision.DAY,
+            sourceId = "itunes"
+        )
+
+        assertEquals(20260000L, yearOnlyTrack.computeReleaseSortKey())
+        assertEquals(20260315L, fullDateTrack.computeReleaseSortKey())
+        assertTrue(fullDateTrack.computeReleaseSortKey() > yearOnlyTrack.computeReleaseSortKey())
+
+        val group = CatalogDataSource.getDefaultNewReleasesGroup("IR")
+        val ordered = GroupEngine.evaluate(group, listOf(yearOnlyTrack, fullDateTrack))
+        assertEquals(2002L, ordered.first().id)
+    }
+
+    @Test
+    fun `Section 2_4 GroupEngine deduplicates same artist and title across providers and prefers full stream`() {
+        val fullStream = Track(
+            id = 1010L,
+            title = "Bi Ehsas",
+            artist = "Shadmehr Aghili",
+            album = "Single",
+            artworkUrl = "",
+            previewUrl = "https://ups.musics-fa.com/tagdl/1403/Shadmehr%20-%20Bi%20Ehsas%20(320).mp3",
+            durationMs = 210_000L,
+            releaseYear = "2025",
+            releaseDateIso = "2025",
+            datePrecision = com.example.data.model.DatePrecision.YEAR,
+            sourceId = "curated",
+            isPreviewOnly = false
+        )
+        val previewDuplicate = Track(
+            id = 2020L,
+            title = "Bi-Ehsas",
+            artist = "Shadmehr Aghili",
+            album = "Single",
+            artworkUrl = "",
+            previewUrl = "https://audio-ssl.itunes.apple.com/itunes-assets/BiEhsasPreview.m4a",
+            durationMs = 30_000L,
+            releaseYear = "2025",
+            releaseDateIso = "2025-07-19",
+            datePrecision = com.example.data.model.DatePrecision.DAY,
+            sourceId = "itunes",
+            isPreviewOnly = true
+        )
+
+        val deduped = GroupEngine.deduplicateTracks(listOf(previewDuplicate, fullStream))
+        assertEquals(1, deduped.size)
+        val survivor = deduped.first()
+        assertFalse("Full stream must be preferred over 30s preview", survivor.isPreviewOnly)
+        assertEquals("2025-07-19", survivor.releaseDateIso)
+        assertEquals(com.example.data.model.DatePrecision.DAY, survivor.datePrecision)
+    }
+
+    @Test
+    fun `Section 2_5 EditorialBannerValidator rejects expired, inactive, and unsafe banner targets`() {
+        val nowMs = com.example.data.provider.EditorialBannerValidator.parseIsoToEpochMs("2026-06-01T00:00:00Z")!!
+        val validBanner = com.example.data.provider.EditorialBannerValidator.getDefaultEditorialBanners().first()
+        assertTrue(com.example.data.provider.EditorialBannerValidator.isValid(validBanner, "IR", nowMs))
+
+        val expiredBanner = validBanner.copy(
+            id = "expired_1",
+            endsAtIso = "2025-01-02T00:00:00Z"
+        )
+        assertFalse(com.example.data.provider.EditorialBannerValidator.isValid(expiredBanner, "IR", nowMs))
+
+        val invalidTargetBanner = validBanner.copy(
+            id = "bad_target",
+            actionType = com.example.data.provider.EditorialBannerActionType.MOOD,
+            actionTarget = "non_existent_mood_ target"
+        )
+        assertFalse(com.example.data.provider.EditorialBannerValidator.isValid(invalidTargetBanner, "IR", nowMs))
+
+        val insecureImageBanner = validBanner.copy(
+            id = "http_image",
+            imageUrl = "http://insecure.example.com/banner.jpg"
+        )
+        assertFalse(com.example.data.provider.EditorialBannerValidator.isValid(insecureImageBanner, "IR", nowMs))
+    }
+
+    @Test
+    fun `Section 3_1 ProviderRegistry documents verified statuses and rejects unauthorized scrapers`() {
+        assertEquals(
+            com.example.data.provider.ProviderStatus.APPROVED,
+            com.example.data.provider.ProviderRegistry.getStatus("curated")
+        )
+        assertEquals(
+            com.example.data.provider.ProviderStatus.APPROVED,
+            com.example.data.provider.ProviderRegistry.getStatus("itunes")
+        )
+        assertEquals(
+            com.example.data.provider.ProviderStatus.CONDITIONAL,
+            com.example.data.provider.ProviderRegistry.getStatus("internet_archive")
+        )
+        assertEquals(
+            com.example.data.provider.ProviderStatus.METADATA_ONLY,
+            com.example.data.provider.ProviderRegistry.getStatus("musicbrainz")
+        )
+        assertEquals(
+            com.example.data.provider.ProviderStatus.REJECTED,
+            com.example.data.provider.ProviderRegistry.getStatus("musics_fa_scraper")
+        )
+        assertEquals(
+            com.example.data.provider.ProviderStatus.REJECTED,
+            com.example.data.provider.ProviderRegistry.getStatus("youtube_extractor")
+        )
+        assertEquals(
+            com.example.data.provider.ProviderStatus.BLOCKED_NO_BACKEND,
+            com.example.data.provider.ProviderRegistry.getStatus("firebase_phone_auth")
+        )
+    }
+
+    @Test
+    fun `Section 4_1 DriveStorageService removes 123456 backdoor, never leaks OTP to client, and enforces attempt limits`() = runTest {
+        val service = com.example.data.remote.DriveStorageService(userPreferences = null)
+        val phone = "+989123456789"
+
+        // 1. Requesting OTP without a backend returns BLOCKED_NO_BACKEND and never leaks a code
+        val dispatch = service.requestOtp("+98", "09123456789", "user@example.com", com.example.data.model.OtpMode.SMART_FALLBACK)
+        assertFalse(dispatch.success)
+        assertEquals(com.example.data.model.OtpVerificationStatus.BLOCKED_NO_BACKEND, dispatch.status)
+        assertEquals(null, dispatch.generatedCodeForFallbackOrTest)
+
+        // 2. Hardcoded "123456" backdoor is rejected across all modes
+        com.example.data.model.OtpMode.entries.forEach { mode ->
+            assertFalse(
+                "Hardcoded 123456 must never be accepted in mode $mode",
+                service.verifyOtp(phone, "123456", mode)
+            )
+        }
+
+        // 3. Server-issued challenge enforces 5-attempt limit and one-time use
+        val now = 1_700_000_000_000L
+        service.registerServerIssuedChallengeForTest(phone, "654321", issuedAtMs = now)
+        repeat(4) {
+            assertEquals(
+                com.example.data.model.OtpVerificationStatus.EXPIRED_OR_INVALID,
+                service.verifyOtpDetailed(phone, "000000", com.example.data.model.OtpMode.SMART_FALLBACK, nowMs = now + 1000L)
+            )
+        }
+        // 5th wrong attempt triggers MAX_ATTEMPTS_EXCEEDED and invalidates the challenge
+        assertEquals(
+            com.example.data.model.OtpVerificationStatus.MAX_ATTEMPTS_EXCEEDED,
+            service.verifyOtpDetailed(phone, "000000", com.example.data.model.OtpMode.SMART_FALLBACK, nowMs = now + 2000L)
+        )
+        // Even the correct code is now rejected because the challenge was invalidated
+        assertFalse(service.verifyOtp(phone, "654321", com.example.data.model.OtpMode.SMART_FALLBACK, nowMs = now + 3000L))
+    }
 }
+
 
 
 

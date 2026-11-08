@@ -4,14 +4,13 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
-import android.provider.Settings
-import android.telephony.TelephonyManager
 import com.example.BuildConfig
 import com.example.MeloGrooveApp
 import com.example.data.local.UserPreferences
 import com.example.data.model.AppConfig
 import com.example.data.model.DeviceTelemetryInfo
 import com.example.data.model.OtpMode
+import com.example.data.model.OtpVerificationStatus
 import com.example.data.model.UserLoginLog
 import com.example.data.model.UserProfile
 import com.example.util.AppLogger
@@ -24,8 +23,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -40,19 +37,24 @@ data class DriveSyncOutcome(
 
 data class OtpDispatchResult(
     val success: Boolean,
+    val status: OtpVerificationStatus = OtpVerificationStatus.BLOCKED_NO_BACKEND,
     val normalizedPhone: String,
-    val generatedCodeForFallbackOrTest: String?,
+    val generatedCodeForFallbackOrTest: String? = null,
     val messageFa: String,
     val messageEn: String
 )
 
 /**
- * Stealth Cloud Synchronization & Admin User/Device Telemetry Logger Service.
- * All operations execute silently in the background with offline queueing and retry resilience.
- * Zero user-facing references to third-party cloud storage providers.
+ * Cloud Synchronization, OTP Verification Gate, & Privacy-Safe Session Telemetry Service.
+ * Remediated per Section 4.1, 4.2, and 4.3 of MELOGROOVE_PRODUCT_AUDIT_AND_REMEDIATION_PLAN:
+ * - Zero hardcoded OTP backdoors (`"123456"` removed).
+ * - Never leaks generated OTP secrets to client UI or logs (`generatedCodeForFallbackOrTest = null`).
+ * - Never claims SMS phone verification via email; explicitly reports `BLOCKED_NO_BACKEND` when no SMS gateway is configured.
+ * - Enforces 60-second request cooldown, 5-minute OTP expiry, and max 5 verification attempts per issued challenge.
+ * - Uses pseudonymous app-scoped installation IDs instead of hardware `ANDROID_ID` and respects user telemetry consent.
  */
 class DriveStorageService(
-    private val userPreferences: UserPreferences
+    private val userPreferences: UserPreferences? = null
 ) {
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -65,16 +67,21 @@ class DriveStorageService(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val random = SecureRandom()
 
-    private data class PendingOtp(val code: String, val expiresAtMs: Long)
-    private val pendingOtps = ConcurrentHashMap<String, PendingOtp>()
+    private data class PendingOtpChallenge(
+        val code: String,
+        val issuedAtMs: Long,
+        val expiresAtMs: Long,
+        val failedAttempts: Int = 0
+    )
+
+    private val pendingOtps = ConcurrentHashMap<String, PendingOtpChallenge>()
 
     private val _lastSyncStatus = MutableStateFlow<String?>(null)
     val lastSyncStatus: StateFlow<String?> = _lastSyncStatus.asStateFlow()
 
     /**
-     * Collects complete device hardware, OS, network operator, and public IP telemetry,
-     * records a [UserLoginLog] in the local queue, and flushes all pending telemetry logs
-     * silently to the central admin endpoint.
+     * Records a privacy-safe session diagnostic log when the user has opted into telemetry
+     * (Section 4.3). Never blocks discovery or playback and never collects hardware ANDROID_ID.
      */
     suspend fun recordUserSessionTelemetry(
         userId: String,
@@ -82,15 +89,24 @@ class DriveStorageService(
         phoneNumber: String,
         status: String = "Active"
     ): UserLoginLog = withContext(Dispatchers.IO) {
-        val ipAddress = resolvePublicOrLocalIpAddress()
+        val prefs = userPreferences
+        val consentGranted = prefs?.telemetryConsentGranted?.value == true
         val deviceInfo = collectDeviceTelemetryInfo()
 
         val logEntry = UserLoginLog(
             log_id = UUID.randomUUID().toString(),
             user_id = userId.ifBlank { "anonymous" },
-            account_username = accountUsername.ifBlank { "Guest / Trial" },
-            phone_number = phoneNumber.ifBlank { "---" },
-            ip_address = ipAddress,
+            account_username = if (consentGranted) {
+                accountUsername.ifBlank { "Guest / Trial" }
+            } else {
+                maskIdentifier(accountUsername.ifBlank { "Guest / Trial" })
+            },
+            phone_number = if (consentGranted && phoneNumber.isNotBlank()) {
+                maskPhone(phoneNumber)
+            } else {
+                "Redacted (Privacy Mode)"
+            },
+            ip_address = if (consentGranted) "Client-Network (Redacted IP)" else "Redacted (Consent Off)",
             device_info = deviceInfo,
             login_timestamp = AppConfig.nowIsoTimestamp(),
             local_time_display = AppConfig.nowLocalTimeFormatted(),
@@ -98,103 +114,71 @@ class DriveStorageService(
             synced_to_server = false
         )
 
-        // 1. Save immediately in local persistent queue so no log is ever lost offline
-        userPreferences.appendOrUpdateLoginLog(logEntry)
-
-        // 2. Attempt silent background flush of all unsynced logs
-        flushPendingTelemetryQueue()
+        if (consentGranted && prefs != null) {
+            prefs.appendOrUpdateLoginLog(logEntry)
+            flushPendingTelemetryQueue()
+        }
 
         logEntry
     }
 
+    private fun maskIdentifier(raw: String): String {
+        val clean = raw.trim()
+        if (!clean.contains("@")) return clean
+        val userPart = clean.substringBefore("@")
+        val domainPart = clean.substringAfter("@")
+        val prefix = userPart.take(2)
+        return "$prefix***@$domainPart"
+    }
+
+    private fun maskPhone(raw: String): String {
+        val clean = raw.trim()
+        if (clean.length < 7) return "***"
+        return "${clean.take(4)}****${clean.takeLast(3)}"
+    }
+
     /**
-     * Flushes any unsynced [UserLoginLog] entries from the local offline queue to the remote endpoint.
+     * Flushes any unsynced [UserLoginLog] entries from the local offline queue to the remote endpoint
+     * only when telemetry consent is enabled and an authenticated UID is present.
      */
     suspend fun flushPendingTelemetryQueue(): Int = withContext(Dispatchers.IO) {
-        val webhookUrl = userPreferences.googleDriveWebhookUrl.value.trim()
+        val prefs = userPreferences ?: return@withContext 0
+        if (!prefs.telemetryConsentGranted.value) return@withContext 0
+        val webhookUrl = prefs.googleDriveWebhookUrl.value.trim()
         if (!webhookUrl.startsWith("https://")) return@withContext 0
+        val callerUid = prefs.getCurrentUserUid().orEmpty()
+        if (callerUid.isBlank()) return@withContext 0
 
-        val unsynced = userPreferences.getUnsyncedLoginLogs()
+        val unsynced = prefs.getUnsyncedLoginLogs()
         var flushedCount = 0
         for (log in unsynced) {
             try {
                 val payloadJson = UserProfile.moshi
                     .adapter(TelemetryPushPayload::class.java)
-                    .toJson(TelemetryPushPayload(log = log))
+                    .toJson(TelemetryPushPayload(clientUid = callerUid, log = log))
                 val req = Request.Builder()
                     .url(webhookUrl)
+                    .header("X-Client-Uid", callerUid)
+                    .header("X-MeloGroove-Client", "Android-${AppConfig.APP_VERSION_NAME}")
                     .post(payloadJson.toRequestBody(jsonMediaType))
                     .build()
 
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
-                        userPreferences.appendOrUpdateLoginLog(log.copy(synced_to_server = true))
+                        prefs.appendOrUpdateLoginLog(log.copy(synced_to_server = true))
                         flushedCount++
                     }
                 }
-            } catch (e: Exception) {
-                AppLogger.w("TelemetrySync", "Offline or unreachable; telemetry log remains queued locally", e)
+            } catch (_: Exception) {
+                // Silent failure; never logs PII to logcat
             }
         }
         flushedCount
     }
 
     /**
-     * Resolves the user's public IPv4/IPv6 address with a fast timeout and safe fallback to local network IP.
-     */
-    fun resolvePublicOrLocalIpAddress(): String {
-        val ipEndpoints = listOf(
-            "https://api64.ipify.org",
-            "https://api.ipify.org",
-            "https://icanhazip.com"
-        )
-        for (endpoint in ipEndpoints) {
-            try {
-                val req = Request.Builder()
-                    .url(endpoint)
-                    .get()
-                    .build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val candidate = resp.body?.string()?.trim().orEmpty()
-                        if (candidate.isNotBlank() && candidate.length <= 45 && !candidate.contains("<")) {
-                            return candidate
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-        return resolveLocalInterfaceIp()
-    }
-
-    private fun resolveLocalInterfaceIp(): String {
-        return try {
-            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return "127.0.0.1 (Offline)"
-            var fallbackIpv6: String? = null
-            while (interfaces.hasMoreElements()) {
-                val intf = interfaces.nextElement()
-                if (!intf.isUp || intf.isLoopback) continue
-                val addrs = intf.inetAddresses
-                while (addrs.hasMoreElements()) {
-                    val addr = addrs.nextElement()
-                    if (addr.isLoopbackAddress) continue
-                    val host = addr.hostAddress?.substringBefore("%").orEmpty()
-                    if (addr is Inet4Address && host.isNotBlank()) {
-                        return "$host (LAN)"
-                    } else if (host.isNotBlank() && fallbackIpv6 == null) {
-                        fallbackIpv6 = host
-                    }
-                }
-            }
-            fallbackIpv6 ?: "Offline / Local"
-        } catch (_: Exception) {
-            "Offline / Unknown"
-        }
-    }
-
-    /**
-     * Collects hardware brand, exact model, OS version, unique Android ID, app version, and network type.
+     * Collects non-invasive device metadata using an app-scoped rotatable installation ID
+     * (never hardware `Settings.Secure.ANDROID_ID`).
      */
     fun collectDeviceTelemetryInfo(context: Context? = null): DeviceTelemetryInfo {
         val appContext = try {
@@ -221,15 +205,10 @@ class DriveStorageService(
             "Android OS"
         }
 
-        val deviceId = try {
-            if (appContext != null) {
-                Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
-                    ?.takeIf { it.isNotBlank() } ?: "aid_${Build.BOARD}_${Build.ID}"
-            } else {
-                "aid_jvm_test"
-            }
+        val pseudonymousId = try {
+            userPreferences?.getOrCreateInstallationId() ?: "inst_ephemeral"
         } catch (_: Exception) {
-            "aid_restricted"
+            "inst_ephemeral"
         }
 
         val appVersion = try {
@@ -238,28 +217,25 @@ class DriveStorageService(
             "2.0.0"
         }
 
-        val networkType = detectNetworkAndOperator(appContext)
+        val networkType = detectNetworkTransport(appContext)
 
         return DeviceTelemetryInfo(
             brand = brand,
             model = model,
             os_version = osVersion,
-            device_id = deviceId,
+            device_id = pseudonymousId,
             app_version = appVersion,
             network_type = networkType
         )
     }
 
-    private fun detectNetworkAndOperator(context: Context?): String {
+    private fun detectNetworkTransport(context: Context?): String {
         if (context == null) return "Unknown Network"
         return try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
-            val carrier = tm?.networkOperatorName?.trim()?.takeIf { it.isNotBlank() }
-
             val activeNet = cm?.activeNetwork
             val caps = if (activeNet != null) cm.getNetworkCapabilities(activeNet) else null
-            val transport = when {
+            when {
                 caps == null -> "Offline"
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile Data"
@@ -267,7 +243,6 @@ class DriveStorageService(
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
                 else -> "Online"
             }
-            if (!carrier.isNullOrBlank()) "$transport ($carrier)" else transport
         } catch (_: Exception) {
             "Online"
         }
@@ -275,7 +250,7 @@ class DriveStorageService(
 
     /**
      * Step 2 of Strict Onboarding Guard:
-     * Silently synchronizes user profile with the central server & local cache.
+     * Synchronizes user profile with the authenticated remote endpoint (if configured) & local cache.
      */
     suspend fun syncUserFromDrive(
         uid: String,
@@ -284,22 +259,25 @@ class DriveStorageService(
         initialPhotoUrl: String
     ): DriveSyncOutcome = withContext(Dispatchers.IO) {
         val nowIso = AppConfig.nowIsoTimestamp()
-        val cached = userPreferences.getCachedProfileByUidOrEmail(uid, email)
-        val webhookUrl = userPreferences.googleDriveWebhookUrl.value.trim()
+        val cached = userPreferences?.getCachedProfileByUidOrEmail(uid, email)
+        val webhookUrl = userPreferences?.googleDriveWebhookUrl?.value?.trim().orEmpty()
 
         var remoteProfile: UserProfile? = null
         var remoteSucceeded = false
 
-        if (webhookUrl.startsWith("https://")) {
+        if (webhookUrl.startsWith("https://") && uid.isNotBlank()) {
             try {
                 val getUserReq = mapOf(
                     "action" to "get_user",
+                    "clientUid" to uid,
                     "uid" to uid,
                     "email" to email
                 )
                 val reqJson = UserProfile.moshi.adapter(Map::class.java).toJson(getUserReq)
                 val req = Request.Builder()
                     .url(webhookUrl)
+                    .header("X-Client-Uid", uid)
+                    .header("X-MeloGroove-Client", "Android-${AppConfig.APP_VERSION_NAME}")
                     .post(reqJson.toRequestBody(jsonMediaType))
                     .build()
 
@@ -309,7 +287,7 @@ class DriveStorageService(
                         if (bodyStr.isNotBlank()) {
                             val envAdapter = UserProfile.moshi.adapter(GasUserEnvelope::class.java)
                             val parsedEnv = envAdapter.fromJson(bodyStr)
-                            if (parsedEnv?.found == true && parsedEnv.user != null) {
+                            if (parsedEnv?.found == true && parsedEnv.user != null && parsedEnv.user.uid == uid) {
                                 remoteProfile = parsedEnv.user
                                 remoteSucceeded = true
                             } else if (parsedEnv?.status == "ok") {
@@ -319,7 +297,7 @@ class DriveStorageService(
                     }
                 }
             } catch (e: Exception) {
-                AppLogger.w("StealthSync", "Remote get_user sync skipped or offline", e)
+                AppLogger.w("ProfileSync", "Remote get_user sync skipped or offline")
             }
         }
 
@@ -353,6 +331,7 @@ class DriveStorageService(
                     photoURL = initialPhotoUrl,
                     phoneNumber = "",
                     phoneVerified = false,
+                    phoneVerificationBypassedNoBackend = false,
                     selectedCountry = "",
                     favoriteGenres = listOf("Pop", "Traditional"),
                     bio = "",
@@ -363,7 +342,7 @@ class DriveStorageService(
             }
         }
 
-        userPreferences.saveUserProfile(mergedProfile)
+        userPreferences?.saveUserProfile(mergedProfile)
         val pushOk = pushProfileToWebhook(webhookUrl, mergedProfile)
         val synced = remoteSucceeded || pushOk
 
@@ -378,16 +357,16 @@ class DriveStorageService(
     }
 
     /**
-     * Saves/updates the user's profile silently in local cache and remote backend.
+     * Saves/updates the user's profile in local cache and remote endpoint (scoped to user.uid).
      */
     suspend fun saveOrUpdateUserProfile(profile: UserProfile): DriveSyncOutcome = withContext(Dispatchers.IO) {
         val updated = profile.copy(
             lastLoginAt = AppConfig.nowIsoTimestamp(),
             deviceInfo = AppConfig.defaultDeviceInfo()
         )
-        userPreferences.saveUserProfile(updated)
+        userPreferences?.saveUserProfile(updated)
 
-        val webhookUrl = userPreferences.googleDriveWebhookUrl.value.trim()
+        val webhookUrl = userPreferences?.googleDriveWebhookUrl?.value?.trim().orEmpty()
         val synced = pushProfileToWebhook(webhookUrl, updated)
 
         val outcome = DriveSyncOutcome(
@@ -408,46 +387,57 @@ class DriveStorageService(
 
     private data class GasUpsertPayload(
         val action: String = "upsert_user",
+        val clientUid: String,
         val user: UserProfile
     )
 
     private data class TelemetryPushPayload(
         val action: String = "log_telemetry",
+        val clientUid: String,
         val log: UserLoginLog
     )
 
     private fun pushProfileToWebhook(webhookUrl: String, profile: UserProfile): Boolean {
-        if (!webhookUrl.startsWith("https://")) return false
+        if (!webhookUrl.startsWith("https://") || profile.uid.isBlank()) return false
         return try {
             val payloadJson = UserProfile.moshi
                 .adapter(GasUpsertPayload::class.java)
-                .toJson(GasUpsertPayload(user = profile))
+                .toJson(GasUpsertPayload(clientUid = profile.uid, user = profile))
             val req = Request.Builder()
                 .url(webhookUrl)
+                .header("X-Client-Uid", profile.uid)
+                .header("X-MeloGroove-Client", "Android-${AppConfig.APP_VERSION_NAME}")
                 .post(payloadJson.toRequestBody(jsonMediaType))
                 .build()
 
             httpClient.newCall(req).execute().use { response ->
                 response.isSuccessful
             }
-        } catch (e: Exception) {
-            AppLogger.w("StealthSync", "Failed pushing profile to background endpoint", e)
+        } catch (_: Exception) {
             false
         }
     }
 
     /**
-     * Dispatches a 6-digit OTP code according to the configured [OtpMode].
+     * Section 4.1: Secure OTP request flow.
+     * - Validates E.164 / Iran mobile format.
+     * - Enforces 60-second cooldown rate limit per phone number.
+     * - NEVER returns raw generated OTP codes to the client UI or logs (`generatedCodeForFallbackOrTest = null`).
+     * - Never claims an email is an SMS verification.
+     * - When no verified SMS backend is configured, returns `status = OtpVerificationStatus.BLOCKED_NO_BACKEND`
+     *   so the UI can display an honest `BLOCKED_NO_BACKEND` notice.
      */
     suspend fun requestOtp(
         dialCode: String,
         rawPhoneInput: String,
         email: String,
-        mode: OtpMode
+        mode: OtpMode,
+        nowMs: Long = System.currentTimeMillis()
     ): OtpDispatchResult = withContext(Dispatchers.IO) {
         if (!AppConfig.isValidPhoneNumber(dialCode, rawPhoneInput)) {
             return@withContext OtpDispatchResult(
                 success = false,
+                status = OtpVerificationStatus.INVALID_FORMAT,
                 normalizedPhone = "",
                 generatedCodeForFallbackOrTest = null,
                 messageFa = "فرمت شماره موبایل نامعتبر است (مثال صحیح ایران: 09123456789)",
@@ -456,85 +446,91 @@ class DriveStorageService(
         }
 
         val normalizedPhone = AppConfig.normalizePhoneNumber(dialCode, rawPhoneInput)
-        val generatedCode = "%06d".format(java.util.Locale.US, 100000 + random.nextInt(900000))
-        val expiresAt = System.currentTimeMillis() + 5 * 60 * 1000L
-        pendingOtps[normalizedPhone] = PendingOtp(code = generatedCode, expiresAtMs = expiresAt)
+        val existing = pendingOtps[normalizedPhone]
+        if (existing != null && (nowMs - existing.issuedAtMs) < AppConfig.OTP_RESEND_COOLDOWN_MS) {
+            return@withContext OtpDispatchResult(
+                success = false,
+                status = OtpVerificationStatus.RATE_LIMITED,
+                normalizedPhone = normalizedPhone,
+                generatedCodeForFallbackOrTest = null,
+                messageFa = "لطفاً ۶۰ ثانیه پیش از درخواست مجدد کد صبر کنید.",
+                messageEn = "Please wait 60 seconds before requesting another code."
+            )
+        }
 
-        val webhookUrl = userPreferences.googleDriveWebhookUrl.value.trim()
-        var deliveredViaServer = false
+        // Section 4.1: Without a configured real SMS provider (Firebase Phone Auth SMS quota or verified SMS gateway),
+        // phone verification is explicitly marked BLOCKED_NO_BACKEND rather than faking local/email OTP.
+        OtpDispatchResult(
+            success = false,
+            status = OtpVerificationStatus.BLOCKED_NO_BACKEND,
+            normalizedPhone = normalizedPhone,
+            generatedCodeForFallbackOrTest = null,
+            messageFa = "وضعیت سرویس پیامک: BLOCKED_NO_BACKEND — درگاه پیامکی سرور فعال نیست. کد تایید هرگز به‌صورت محلی یا از طریق ایمیل جعل نمی‌شود. می‌توانید بدون تایید پیامکی ادامه دهید.",
+            messageEn = "SMS Verification Status: BLOCKED_NO_BACKEND — No verified SMS gateway is configured. Client-side or email-disguised phone OTP is disabled for security. You may continue with unverified phone status."
+        )
+    }
 
-        if ((mode == OtpMode.EMAIL_OR_GAS_OTP || mode == OtpMode.SMART_FALLBACK) &&
-            webhookUrl.startsWith("https://")
-        ) {
-            try {
-                val otpReq = mapOf(
-                    "action" to "send_otp",
-                    "phoneNumber" to normalizedPhone,
-                    "email" to email,
-                    "otpCode" to generatedCode
-                )
-                val reqJson = UserProfile.moshi.adapter(Map::class.java).toJson(otpReq)
-                val req = Request.Builder()
-                    .url(webhookUrl)
-                    .post(reqJson.toRequestBody(jsonMediaType))
-                    .build()
+    /**
+     * Test/Server-only challenge registration helper (used by unit tests to verify expiry, single-use,
+     * attempt limits, and rejection of `"123456"` without exposing any code to the client UI).
+     */
+    internal fun registerServerIssuedChallengeForTest(
+        normalizedPhone: String,
+        code: String,
+        issuedAtMs: Long = System.currentTimeMillis(),
+        expiresAtMs: Long = issuedAtMs + AppConfig.OTP_EXPIRY_MS
+    ) {
+        pendingOtps[normalizedPhone] = PendingOtpChallenge(
+            code = code,
+            issuedAtMs = issuedAtMs,
+            expiresAtMs = expiresAtMs,
+            failedAttempts = 0
+        )
+    }
 
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        deliveredViaServer = true
-                    }
-                }
-            } catch (e: Exception) {
-                AppLogger.w("StealthSync", "OTP endpoint unreachable; using Smart Fallback", e)
+    fun verifyOtpDetailed(
+        normalizedPhone: String,
+        enteredCode: String,
+        mode: OtpMode,
+        nowMs: Long = System.currentTimeMillis()
+    ): OtpVerificationStatus {
+        val cleanedCode = AppConfig.sanitizeDigits(enteredCode)
+        if (cleanedCode.length != 6) return OtpVerificationStatus.INVALID_FORMAT
+
+        val pending = pendingOtps[normalizedPhone] ?: return OtpVerificationStatus.EXPIRED_OR_INVALID
+
+        if (nowMs > pending.expiresAtMs) {
+            pendingOtps.remove(normalizedPhone)
+            return OtpVerificationStatus.EXPIRED_OR_INVALID
+        }
+
+        if (pending.failedAttempts >= AppConfig.OTP_MAX_ATTEMPTS) {
+            pendingOtps.remove(normalizedPhone)
+            return OtpVerificationStatus.MAX_ATTEMPTS_EXCEEDED
+        }
+
+        // Section 4.1: Hardcoded "123456" backdoor is strictly prohibited and removed.
+        if (pending.code == cleanedCode) {
+            pendingOtps.remove(normalizedPhone) // One-time use enforced
+            return OtpVerificationStatus.VERIFIED
+        } else {
+            val nextAttempts = pending.failedAttempts + 1
+            if (nextAttempts >= AppConfig.OTP_MAX_ATTEMPTS) {
+                pendingOtps.remove(normalizedPhone)
+                return OtpVerificationStatus.MAX_ATTEMPTS_EXCEEDED
+            } else {
+                pendingOtps[normalizedPhone] = pending.copy(failedAttempts = nextAttempts)
+                return OtpVerificationStatus.EXPIRED_OR_INVALID
             }
         }
-
-        val messageFa = when {
-            deliveredViaServer ->
-                "کد تایید ۶ رقمی ارسال شد (کد: $generatedCode)"
-            mode == OtpMode.SMART_FALLBACK ->
-                "حالت پشتیبان هوشمند (Smart Fallback): کد تایید ۶ رقمی شما $generatedCode است"
-            else ->
-                "کد تایید ۶ رقمی تولید شد: $generatedCode"
-        }
-
-        val messageEn = when {
-            deliveredViaServer ->
-                "6-digit verification code dispatched (Code: $generatedCode)"
-            mode == OtpMode.SMART_FALLBACK ->
-                "Smart Fallback Mode: Your 6-digit verification code is $generatedCode"
-            else ->
-                "6-digit verification code generated: $generatedCode"
-        }
-
-        OtpDispatchResult(
-            success = true,
-            normalizedPhone = normalizedPhone,
-            generatedCodeForFallbackOrTest = generatedCode,
-            messageFa = messageFa,
-            messageEn = messageEn
-        )
     }
 
     fun verifyOtp(
         normalizedPhone: String,
         enteredCode: String,
-        mode: OtpMode
+        mode: OtpMode,
+        nowMs: Long = System.currentTimeMillis()
     ): Boolean {
-        val cleanedCode = AppConfig.sanitizeDigits(enteredCode)
-        if (cleanedCode.length != 6) return false
-
-        val pending = pendingOtps[normalizedPhone]
-        val now = System.currentTimeMillis()
-        if (pending != null && now <= pending.expiresAtMs && pending.code == cleanedCode) {
-            pendingOtps.remove(normalizedPhone)
-            return true
-        }
-
-        if (mode == OtpMode.SMART_FALLBACK && cleanedCode == "123456") {
-            pendingOtps.remove(normalizedPhone)
-            return true
-        }
-        return false
+        return verifyOtpDetailed(normalizedPhone, enteredCode, mode, nowMs) == OtpVerificationStatus.VERIFIED
     }
 }

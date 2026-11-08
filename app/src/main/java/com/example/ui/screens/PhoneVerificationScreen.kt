@@ -107,6 +107,7 @@ fun PhoneVerificationScreen(
     onOtpModeChange: (OtpMode) -> Unit,
     onRequestOtp: (dialCode: String, rawPhone: String) -> Unit,
     onVerifyOtp: (normalizedPhone: String, code: String) -> Unit,
+    onContinueWithoutSmsBackend: (dialCode: String, rawPhone: String) -> Unit = { _, _ -> },
     onSignOutAccount: () -> Unit
 ) {
     val lang = LocalAppLanguage.current
@@ -239,8 +240,8 @@ fun PhoneVerificationScreen(
                     Text(
                         text = tr(
                             lang,
-                            "مرحله ۲: تایید اجباری شماره موبایل (OTP)",
-                            "Step 2: Mandatory Mobile Verification (OTP)"
+                            "مرحله ۲: ثبت و تایید شماره موبایل",
+                            "Step 2: Mobile Phone Registration & Verification"
                         ),
                         style = MaterialTheme.typography.titleMedium,
                         color = AccentGold,
@@ -255,13 +256,13 @@ fun PhoneVerificationScreen(
                             tr(
                                 lang,
                                 "برای تکمیل پرونده کاربری و ورود به مرحله انتخاب کشور، شماره موبایل خود را وارد کنید.",
-                                "Enter your mobile number to verify your profile and proceed to Country Selection."
+                                "Enter your mobile number to complete your profile and proceed to Country Selection."
                             )
                         } else {
                             tr(
                                 lang,
-                                "کد تایید ۶ رقمی برای شماره \u200E$normalizedTargetPhone تولید شد. آن را در کادرهای زیر وارد نمایید.",
-                                "Enter the 6-digit verification code for $normalizedTargetPhone below."
+                                "وضعیت درگاه پیامکی برای شماره \u200E$normalizedTargetPhone را در زیر مشاهده کنید.",
+                                "Review the SMS verification status for $normalizedTargetPhone below."
                             )
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -271,44 +272,43 @@ fun PhoneVerificationScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // OTP_MODE Selector Chips
-                    Text(
-                        text = tr(lang, "حالت ارسال کد (OTP_MODE):", "OTP Verification Mode:"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    // Honest BLOCKED_NO_BACKEND Status Banner (Section 4.1)
+                    Surface(
+                        color = Color(0x26FFA000),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, AccentGold.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
                     ) {
-                        OtpMode.entries.forEach { mode ->
-                            val selected = mode == otpMode
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (selected) AccentGold else BorderSubtle,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { onOtpModeChange(mode) },
-                                color = if (selected) Color(0x28FFB800) else OledSurfaceVariant
-                            ) {
-                                Text(
-                                    text = mode.getTitle(lang),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (selected) AccentGold else TextSecondary,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = tr(
+                                    lang,
+                                    "وضعیت درگاه پیامک: BLOCKED_NO_BACKEND",
+                                    "SMS Gateway Status: BLOCKED_NO_BACKEND"
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AccentGold,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = tr(
+                                    lang,
+                                    "برای حفظ امنیت، تولید کد OTP محلی یا ارسال کد پیامکی از طریق ایمیل غیرفعال شده است. در صورت عدم اتصال درگاه پیامکی سرور، می‌توانید شماره خود را به‌صورت «تاییدنشده با پیامک» ثبت کرده و به مرحله انتخاب کشور بروید.",
+                                    "For security, local OTP generation and email-disguised SMS codes are disabled. When no server SMS gateway is configured, you may save your number as unverified and continue."
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     if (!isOtpSentStep) {
                         // ================= PART 1: COUNTRY DIAL CODE + PHONE INPUT =================
@@ -411,17 +411,41 @@ fun PhoneVerificationScreen(
                                 Icon(Icons.Default.Key, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = tr(lang, "دریافت کد تایید (Send OTP)", "Get Verification Code"),
+                                    text = tr(lang, "بررسی درگاه پیامک (Request SMS OTP)", "Request SMS OTP"),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp
                                 )
                             }
                         }
-                    } else {
-                        // ================= PART 2: 6-BOX OTP INPUT + TIMER + ACTIONS =================
 
-                        // Smart Fallback / Generated Code Helper Banner so user is never blocked
-                        AnimatedVisibility(visible = !generatedFallbackOtp.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                onContinueWithoutSmsBackend(selectedDialCountry.dialCode, rawPhoneInput)
+                            },
+                            enabled = !isBusy,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("continue_without_sms_button"),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text(
+                                text = tr(
+                                    lang,
+                                    "ادامه بدون تایید پیامکی (BLOCKED_NO_BACKEND)",
+                                    "Continue Without SMS Verification (BLOCKED_NO_BACKEND)"
+                                ),
+                                color = Color(0xFF4DB6AC),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else {
+                        // ================= PART 2: 6-BOX OTP INPUT + HONEST STATUS BANNER =================
+
+                        AnimatedVisibility(visible = !statusBannerMessage.isNullOrBlank()) {
                             Surface(
                                 color = Color(0x264DB6AC),
                                 shape = RoundedCornerShape(14.dp),
@@ -437,36 +461,12 @@ fun PhoneVerificationScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = statusBannerMessage ?: tr(
-                                            lang,
-                                            "کد تایید ۶ رقمی شما: $generatedFallbackOtp",
-                                            "Your 6-digit OTP code: $generatedFallbackOtp"
-                                        ),
+                                        text = statusBannerMessage.orEmpty(),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Color(0xFFE0F2F1),
                                         fontWeight = FontWeight.Bold,
                                         textAlign = TextAlign.Center
                                     )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    TextButton(
-                                        onClick = {
-                                            val code = generatedFallbackOtp.orEmpty().take(6)
-                                            for (i in code.indices) {
-                                                otpDigits[i] = code[i].toString()
-                                            }
-                                        },
-                                        modifier = Modifier.testTag("autofill_otp_button")
-                                    ) {
-                                        Text(
-                                            text = tr(
-                                                lang,
-                                                "جایگذاری خودکار کد ($generatedFallbackOtp)",
-                                                "Auto-Fill Code ($generatedFallbackOtp)"
-                                            ),
-                                            color = AccentGold,
-                                            fontWeight = FontWeight.ExtraBold
-                                        )
-                                    }
                                 }
                             }
                         }

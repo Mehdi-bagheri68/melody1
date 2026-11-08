@@ -89,7 +89,8 @@ fun ProfileScreen(
     isSyncing: Boolean,
     syncStatusMessage: String?,
     isAdminUnlocked: Boolean = false,
-    onUnlockAdminPin: (String) -> Boolean = { false },
+    telemetryConsentGranted: Boolean = false,
+    onToggleTelemetryConsent: (Boolean) -> Unit = {},
     onOpenAdminDashboard: () -> Unit = {},
     onBack: () -> Unit,
     onSaveProfile: (displayName: String, bio: String, favoriteGenres: List<String>) -> Unit,
@@ -110,15 +111,11 @@ fun ProfileScreen(
         mutableStateListOf<String>().apply { addAll(profile.favoriteGenres) }
     }
 
-    var showAdminPinPrompt by rememberSaveable { mutableStateOf(false) }
-    var adminPinInput by rememberSaveable { mutableStateOf("") }
-    var adminPinError by rememberSaveable { mutableStateOf(false) }
-
     val countryObj = remember(profile.selectedCountry) {
         CountriesData.getCountryByCode(profile.selectedCountry.ifBlank { "IR" })
     }
 
-    val hasAdminAccess = profile.isAdminUser || isAdminUnlocked
+    val hasAdminAccess = profile.isAdminUser && isAdminUnlocked
 
     LazyColumn(
         modifier = Modifier
@@ -257,7 +254,7 @@ fun ProfileScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Verified Phone Badge + Change Button
+                    // Verified / Unverified Phone Badge + Change Button
                     Surface(
                         color = if (profile.phoneVerified) Color(0x224CAF50) else Color(0x22FF9800),
                         shape = RoundedCornerShape(14.dp),
@@ -281,23 +278,20 @@ fun ProfileScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "\u200E${profile.phoneNumber.ifBlank { "---" }}",
+                                text = "\u200E${profile.phoneNumber.ifBlank { tr(lang, "بدون شماره پیامکی", "Unverified Phone") }}",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = if (profile.phoneVerified) Color(0xFF81C784) else AccentGold,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = tr(lang, "(ویرایش)", "(Edit)"),
+                                text = if (profile.phoneVerified) {
+                                    tr(lang, "• تاییدشده", "• Verified")
+                                } else {
+                                    tr(lang, "• تاییدنشده (ویرایش)", "• Unverified (Edit)")
+                                },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = GlassTealGlow
+                                color = if (profile.phoneVerified) Color(0xFF81C784) else GlassTealGlow
                             )
                         }
                     }
@@ -511,17 +505,69 @@ fun ProfileScreen(
             }
         }
 
-        // 3. Admin User & Device Telemetry Dashboard Access Card
+        // 3. Privacy & Diagnostic Telemetry Consent Card (Section 4.3)
         item {
             Spacer(modifier = Modifier.height(18.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .glassyCard(cornerRadius = 22.dp, isHighlighted = hasAdminAccess)
+                    .glassyCard(cornerRadius = 22.dp, isHighlighted = telemetryConsentGranted)
                     .padding(16.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tr(
+                                lang,
+                                "حریم خصوصی و رضایت ثبت عیب‌یابی نشست",
+                                "Privacy & Session Diagnostic Consent"
+                            ),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = tr(
+                                lang,
+                                "ثبت لاگ عیب‌یابی فقط با رضایت شما انجام می‌شود، از شناسه ناشناس نصب استفاده می‌کند و هرگز ANDROID_ID یا IP خام را بدون اجازه ذخیره نمی‌کند.",
+                                "Diagnostic logs are strictly opt-in, use a rotatable installation ID, and never collect hardware ANDROID_ID or raw IP without consent."
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    GlassyActionButton(
+                        text = if (telemetryConsentGranted) {
+                            tr(lang, "فعال (لغو)", "Opted In")
+                        } else {
+                            tr(lang, "غیرفعال", "Opted Out")
+                        },
+                        onClick = { onToggleTelemetryConsent(!telemetryConsentGranted) },
+                        height = 40.dp,
+                        testTag = "profile_telemetry_consent_button"
+                    )
+                }
+            }
+        }
+
+        // 4. Owner-Only Admin Telemetry Dashboard Card (Strictly gated by authenticated ADMIN_EMAIL, no hardcoded PIN)
+        if (hasAdminAccess) {
+            item {
+                Spacer(modifier = Modifier.height(18.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .glassyCard(cornerRadius = 22.dp, isHighlighted = true)
+                        .padding(16.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -535,7 +581,7 @@ fun ProfileScreen(
                             Box(
                                 modifier = Modifier
                                     .size(40.dp)
-                                    .glassyIconOrb(isSelected = hasAdminAccess),
+                                    .glassyIconOrb(isSelected = true),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -549,8 +595,8 @@ fun ProfileScreen(
                                 Text(
                                     text = tr(
                                         lang,
-                                        "پنل مدیریت و ردیابی نشست‌ها (Admin Telemetry)",
-                                        "Admin User & Device Telemetry Panel"
+                                        "پنل مدیریت مالک پروژه (Admin Telemetry)",
+                                        "Owner Admin Telemetry Panel"
                                     ),
                                     style = MaterialTheme.typography.titleSmall,
                                     color = TextPrimary,
@@ -559,8 +605,8 @@ fun ProfileScreen(
                                 Text(
                                     text = tr(
                                         lang,
-                                        "مشاهده لاگ ورود کاربران، آدرس IP، مدل گوشی و وضعیت نشست",
-                                        "View user login logs, IP address, device model & active status"
+                                        "دسترسی انحصاری حساب مالک (${AppConfig.ADMIN_EMAIL})",
+                                        "Restricted to verified project owner (${AppConfig.ADMIN_EMAIL})"
                                     ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextSecondary
@@ -569,78 +615,11 @@ fun ProfileScreen(
                         }
 
                         GlassyActionButton(
-                            text = if (hasAdminAccess) {
-                                tr(lang, "ورود به پنل", "Open Panel")
-                            } else {
-                                tr(lang, "احراز ادمین", "Admin PIN")
-                            },
-                            onClick = {
-                                if (hasAdminAccess) {
-                                    onOpenAdminDashboard()
-                                } else {
-                                    showAdminPinPrompt = !showAdminPinPrompt
-                                }
-                            },
+                            text = tr(lang, "ورود به پنل", "Open Panel"),
+                            onClick = onOpenAdminDashboard,
                             height = 40.dp,
                             testTag = "profile_admin_panel_button"
                         )
-                    }
-
-                    AnimatedVisibility(visible = showAdminPinPrompt && !hasAdminAccess) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = adminPinInput,
-                                onValueChange = {
-                                    adminPinInput = it
-                                    adminPinError = false
-                                },
-                                label = {
-                                    Text(tr(lang, "کد امنیتی مدیریت (پیش‌فرض: 2026)", "Admin Access PIN (Default: 2026)"))
-                                },
-                                singleLine = true,
-                                isError = adminPinError,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("profile_admin_pin_input"),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = GlassTealGlow,
-                                    unfocusedBorderColor = BorderSubtle,
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary
-                                )
-                            )
-                            if (adminPinError) {
-                                Text(
-                                    text = tr(lang, "کد امنیتی وارد شده معتبر نیست.", "Invalid Admin PIN."),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFFFF8A80)
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                GlassyActionButton(
-                                    text = tr(lang, "تایید و باز کردن پنل مدیریت", "Unlock & Open Admin Panel"),
-                                    onClick = {
-                                        if (onUnlockAdminPin(adminPinInput.trim())) {
-                                            showAdminPinPrompt = false
-                                            onOpenAdminDashboard()
-                                        } else {
-                                            adminPinError = true
-                                        }
-                                    },
-                                    height = 42.dp,
-                                    testTag = "profile_unlock_admin_submit_button"
-                                )
-                            }
-                        }
                     }
                 }
             }

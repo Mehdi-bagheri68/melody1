@@ -87,6 +87,64 @@ data class GroupSection(
     val tracks: List<Track>
 )
 
+/**
+ * Section 2.2: Explicit release date precision so year-only catalog entries
+ * never fabricate month/day or outrank verified full-date releases of the same year.
+ */
+enum class DatePrecision(val weight: Int) {
+    DAY(3),
+    MONTH(2),
+    YEAR(1),
+    UNKNOWN(0);
+
+    companion object {
+        fun inferFromIso(isoOrYear: String?): DatePrecision {
+            val clean = isoOrYear?.trim().orEmpty()
+            return when {
+                Regex("^\\d{4}-\\d{2}-\\d{2}.*").matches(clean) -> DAY
+                Regex("^\\d{4}-\\d{2}$").matches(clean) -> MONTH
+                Regex("^\\d{4}$").matches(clean) -> YEAR
+                else -> UNKNOWN
+            }
+        }
+    }
+}
+
+enum class ReleaseKind(val labelFa: String, val labelEn: String) {
+    SINGLE("تک‌آهنگ", "Single"),
+    ALBUM("آلبوم", "Album"),
+    EP("ای‌پی (EP)", "EP"),
+    REISSUE("بازنشر", "Reissue"),
+    COMPILATION("مجموعه", "Compilation"),
+    UNKNOWN("قطعه", "Track");
+
+    fun getLabel(lang: AppLanguage): String = if (lang == AppLanguage.FA) labelFa else labelEn
+}
+
+enum class ContentOrigin(val labelFa: String, val labelEn: String) {
+    LIVE_PROVIDER("منبع آنلاین", "Live Provider"),
+    CURATED_CATALOG("کاتالوگ منتخب", "Curated Catalog"),
+    LOCAL_CACHE("کش دستگاه", "Cached");
+
+    fun getLabel(lang: AppLanguage): String = if (lang == AppLanguage.FA) labelFa else labelEn
+}
+
+/**
+ * Section 2.3: Honest popularity/ranking signal with explicit source attribution and retrieval timestamp.
+ * Never fabricates play counts when a provider does not supply them.
+ */
+data class PopularitySignal(
+    val sourceId: String,
+    val labelFa: String,
+    val labelEn: String,
+    val rank: Int? = null,
+    val retrievedAtMs: Long = System.currentTimeMillis(),
+    val isVerifiedLiveSignal: Boolean = false
+) {
+    fun getDisplayBadge(lang: AppLanguage): String =
+        if (lang == AppLanguage.FA) labelFa else labelEn
+}
+
 data class Track(
     val id: Long,
     val title: String,
@@ -103,7 +161,15 @@ data class Track(
     val sourceId: String = "curated",
     val artistId: String = slugifyArtistId(artist),
     val featuredArtistIds: List<String> = emptyList(),
-    val artwork: Artwork? = null
+    val artwork: Artwork? = null,
+    val releaseDateIso: String? = null,
+    val datePrecision: DatePrecision = DatePrecision.inferFromIso(releaseDateIso ?: releaseYear),
+    val releaseKind: ReleaseKind = ReleaseKind.SINGLE,
+    val contentOrigin: ContentOrigin = if (sourceId == "curated") ContentOrigin.CURATED_CATALOG else ContentOrigin.LIVE_PROVIDER,
+    val sourceLabelFa: String = if (sourceId == "curated") "آرشیو منتخب" else sourceId,
+    val sourceLabelEn: String = if (sourceId == "curated") "Curated Catalog" else sourceId,
+    val isPreviewOnly: Boolean = sourceId.equals("itunes", ignoreCase = true),
+    val popularitySignal: PopularitySignal? = null
 ) {
     val durationFormatted: String
         get() {
@@ -116,6 +182,63 @@ data class Track(
 
     val highResArtworkUrl: String
         get() = artworkUrl
+
+    fun getSourceBadge(lang: AppLanguage): String {
+        val base = if (lang == AppLanguage.FA) sourceLabelFa else sourceLabelEn
+        return if (isPreviewOnly) {
+            if (lang == AppLanguage.FA) "$base • پیش‌نمایش ۳۰ ثانیه" else "$base • 30s Preview"
+        } else {
+            base
+        }
+    }
+
+    fun getReleaseBadgeText(lang: AppLanguage): String {
+        val iso = releaseDateIso?.trim().orEmpty()
+        return when (datePrecision) {
+            DatePrecision.DAY -> {
+                val ymd = iso.take(10)
+                if (lang == AppLanguage.FA) "انتشار $ymd" else "Released $ymd"
+            }
+            DatePrecision.MONTH -> {
+                val ym = iso.take(7)
+                if (lang == AppLanguage.FA) "انتشار $ym" else "Released $ym"
+            }
+            DatePrecision.YEAR -> {
+                val yr = releaseYear.take(4).ifBlank { "—" }
+                if (contentOrigin == ContentOrigin.CURATED_CATALOG) {
+                    if (lang == AppLanguage.FA) "منتخب $yr" else "Catalog $yr"
+                } else {
+                    if (lang == AppLanguage.FA) "سال $yr" else "Year $yr"
+                }
+            }
+            DatePrecision.UNKNOWN -> {
+                if (lang == AppLanguage.FA) "آرشیو منتخب" else "Curated"
+            }
+        }
+    }
+
+    /**
+     * Computes a deterministic numeric sort key for release ordering without fabricating month/day
+     * for year-only tracks (`YYYY0000` vs `YYYYMMDD`), so verified full-date releases of the same year
+     * always rank above year-only catalog entries.
+     */
+    fun computeReleaseSortKey(): Long {
+        val iso = (releaseDateIso ?: releaseYear).trim()
+        val year = iso.take(4).toLongOrNull() ?: releaseYear.take(4).toLongOrNull() ?: 0L
+        return when (datePrecision) {
+            DatePrecision.DAY -> {
+                val month = iso.drop(5).take(2).toLongOrNull()?.coerceIn(1L, 12L) ?: 0L
+                val day = iso.drop(8).take(2).toLongOrNull()?.coerceIn(1L, 31L) ?: 0L
+                year * 10000L + month * 100L + day
+            }
+            DatePrecision.MONTH -> {
+                val month = iso.drop(5).take(2).toLongOrNull()?.coerceIn(1L, 12L) ?: 0L
+                year * 10000L + month * 100L
+            }
+            DatePrecision.YEAR -> year * 10000L
+            DatePrecision.UNKNOWN -> 0L
+        }
+    }
 
     companion object {
         fun slugifyArtistId(artistName: String): String {

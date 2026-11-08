@@ -10,12 +10,20 @@ import com.example.data.local.PlaylistTrackCrossRefEntity
 import com.example.data.local.toFavoriteEntity
 import com.example.data.local.toHistoryEntity
 import com.example.data.model.ArtistSortOption
+import com.example.data.model.ContentOrigin
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
+import com.example.data.model.DatePrecision
 import com.example.data.model.Playlist
+import com.example.data.model.PopularitySignal
+import com.example.data.model.ReleaseKind
 import com.example.data.model.Track
+import com.example.data.provider.CuratedCatalogProviderAdapter
+import com.example.data.provider.EditorialBanner
+import com.example.data.provider.EditorialBannerValidator
+import com.example.data.provider.InternetArchiveProviderAdapter
+import com.example.data.provider.ItunesProviderAdapter
 import com.example.util.AppLogger
-import com.example.util.IdGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -23,17 +31,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Refactored MusicRepository (v1.6.0):
- * - Externalizes static catalog to [CatalogDataSource] (`assets/catalog/artists.json`, `tracks.json`, `groups.json`).
- * - Enforces strict 1-to-1 artwork ownership via [ArtworkResolver] (fixes N-01).
- * - Evaluates New Releases (`perArtistCap = 1`) and Trending shelves via [GroupEngine] (fixes N-03, U-03).
- * - Uses 64-bit deterministic IDs via [IdGenerator.stable64BitId] (fixes N-07).
+ * Multi-Source MusicRepository with Stale-While-Revalidate Refresh Orchestrator.
+ * Remediated per Section 2.1, 2.2, 2.3, 2.4, 2.5, and 2.6 of MELOGROOVE_PRODUCT_AUDIT_AND_REMEDIATION_PLAN:
+ * - Uses official/approved provider adapters ([ItunesProviderAdapter], [InternetArchiveProviderAdapter], [CuratedCatalogProviderAdapter]).
+ * - Disables unauthorized HTML scraping (`musics-fa.com` scraper disabled by default).
+ * - Implements Stale-While-Revalidate TTL tracking (Trending = 15m, New Releases = 30m, Editorial Banners = 6h)
+ *   and preserves last-known-good section snapshots when a network provider fails.
+ * - Deduplicates tracks across providers and across Home shelves.
  */
 class MusicRepository(
     private val musicDao: MusicDao,
@@ -45,25 +53,33 @@ class MusicRepository(
         val createdAtMs: Long
     )
 
+    data class HomeSectionSnapshot(
+        val tracks: List<Track>,
+        val fetchedAtMs: Long,
+        val hasLiveProviderItems: Boolean
+    )
+
     private val cacheMutex = Mutex()
     private val searchCache = LinkedHashMap<String, CacheEntry>(MAX_CACHE_ENTRIES, 0.75f, true)
 
-    private val scraperClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .build()
-    }
+    private val trendingSnapshots = ConcurrentHashMap<String, HomeSectionSnapshot>()
+    private val newReleasesSnapshots = ConcurrentHashMap<String, HomeSectionSnapshot>()
+    private val editorialBannerTimestampByCountry = ConcurrentHashMap<String, Long>()
+
+    private val curatedAdapter = CuratedCatalogProviderAdapter()
+    private val itunesAdapter = ItunesProviderAdapter(itunesApi)
+    private val archiveAdapter = InternetArchiveProviderAdapter(archiveApi)
 
     /**
      * Synchronous initial data getters evaluated via [GroupEngine] so HomeScreen renders
-     * immediately on frame 0 with `perArtistCap = 1` on New Releases (fixes N-03 & U-03).
+     * immediately on cold start (Stale-While-Revalidate Phase 1) with `perArtistCap = 1` on New Releases.
      */
     fun getInitialNewReleasesSync(country: Country): List<Track> {
+        val code = country.code.uppercase(Locale.ROOT)
+        newReleasesSnapshots[code]?.tracks?.takeIf { it.isNotEmpty() }?.let { return it }
+
         val countryTracks = getCuratedTracksForCountry(country, emptySet())
-        val group = CatalogDataSource.getDefaultNewReleasesGroup(country.code)
+        val group = CatalogDataSource.getDefaultNewReleasesGroup(code)
         return GroupEngine.evaluate(
             group = group,
             tracks = countryTracks,
@@ -72,13 +88,69 @@ class MusicRepository(
     }
 
     fun getInitialTrendingSync(country: Country): List<Track> {
+        val code = country.code.uppercase(Locale.ROOT)
+        trendingSnapshots[code]?.tracks?.takeIf { it.isNotEmpty() }?.let { return it }
+
+        val newReleaseIds = getInitialNewReleasesSync(country).map { it.id }.toSet()
         val countryTracks = getCuratedTracksForCountry(country, emptySet())
-        val group = CatalogDataSource.getDefaultTrendingGroup(country.code)
-        return GroupEngine.evaluate(
+        val group = CatalogDataSource.getDefaultTrendingGroup(code)
+        val deduplicated = GroupEngine.evaluate(
             group = group,
             tracks = countryTracks,
-            artists = CatalogDataSource.getArtistsById()
+            artists = CatalogDataSource.getArtistsById(),
+            excludeTrackIds = newReleaseIds
         )
+        return if (deduplicated.isNotEmpty()) {
+            deduplicated
+        } else {
+            GroupEngine.evaluate(
+                group = group,
+                tracks = countryTracks,
+                artists = CatalogDataSource.getArtistsById()
+            )
+        }
+    }
+
+    fun getEditorialBannersForCountry(
+        country: Country,
+        nowMs: Long = System.currentTimeMillis()
+    ): List<EditorialBanner> {
+        val code = country.code.uppercase(Locale.ROOT)
+        editorialBannerTimestampByCountry[code] = nowMs
+        return EditorialBannerValidator.filterActiveForCountry(
+            banners = EditorialBannerValidator.getDefaultEditorialBanners(),
+            countryCode = code,
+            nowMs = nowMs
+        )
+    }
+
+    /**
+     * Section 2.1 & 2.6: Checks if any Home section for [countryCode] has exceeded its TTL.
+     */
+    fun isHomeSectionExpired(
+        countryCode: String,
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        val code = countryCode.uppercase(Locale.ROOT)
+        val trendingSnap = trendingSnapshots[code]
+        val releasesSnap = newReleasesSnapshots[code]
+        if (trendingSnap == null || releasesSnap == null) return true
+        val trendingExpired = (nowMs - trendingSnap.fetchedAtMs) >= TRENDING_TTL_MS
+        val releasesExpired = (nowMs - releasesSnap.fetchedAtMs) >= NEW_RELEASES_TTL_MS
+        return trendingExpired || releasesExpired
+    }
+
+    fun getHomeLastUpdatedMs(countryCode: String): Long {
+        val code = countryCode.uppercase(Locale.ROOT)
+        val t1 = trendingSnapshots[code]?.fetchedAtMs ?: 0L
+        val t2 = newReleasesSnapshots[code]?.fetchedAtMs ?: 0L
+        return maxOf(t1, t2)
+    }
+
+    fun hasLiveProviderItems(countryCode: String): Boolean {
+        val code = countryCode.uppercase(Locale.ROOT)
+        return (trendingSnapshots[code]?.hasLiveProviderItems == true) ||
+            (newReleasesSnapshots[code]?.hasLiveProviderItems == true)
     }
 
     suspend fun clearSearchCache() {
@@ -95,9 +167,9 @@ class MusicRepository(
         iranNoVpnMode: Boolean
     ): String {
         return listOf(
-            term.trim().lowercase(),
-            (countryCode ?: "").trim().uppercase(),
-            (genreFilter ?: "").trim().lowercase(),
+            term.trim().lowercase(Locale.ROOT),
+            (countryCode ?: "").trim().uppercase(Locale.ROOT),
+            (genreFilter ?: "").trim().lowercase(Locale.ROOT),
             (yearFilter ?: "").trim(),
             if (iranNoVpnMode) "novpn" else "global"
         ).joinToString("|")
@@ -133,88 +205,59 @@ class MusicRepository(
             }
         }
 
-        val fullTracks = mutableListOf<Track>()
+        val targetCountry = CountriesData.getCountryByCode(countryCode ?: "IR")
+        val combinedPool = mutableListOf<Track>()
         var encounteredNetworkError = false
 
-        val basePool = if (!countryCode.isNullOrBlank() && term.isBlank()) {
-            getCuratedTracksForCountry(CountriesData.getCountryByCode(countryCode), favoriteIds)
+        // 1. Curated Catalog (APPROVED — always fast and available offline/Iran No-VPN)
+        val baseCurated = if (!countryCode.isNullOrBlank() && term.isBlank()) {
+            getCuratedTracksForCountry(targetCountry, favoriteIds)
         } else {
             getAllCuratedFullTracks(favoriteIds)
         }
 
         val curatedMatches = if (term.isBlank()) {
-            basePool
+            baseCurated
         } else {
-            basePool.filter {
+            baseCurated.filter {
                 it.title.contains(term, ignoreCase = true) ||
                     it.artist.contains(term, ignoreCase = true) ||
                     it.album.contains(term, ignoreCase = true) ||
                     it.genre.contains(term, ignoreCase = true)
             }
         }
-        fullTracks.addAll(curatedMatches)
+        combinedPool.addAll(curatedMatches)
 
-        if (term.isNotBlank() && SourceResolver.isHostHealthy("musics-fa.com")) {
-            val liveResult = fetchLiveFromMusicsFa(
+        // 2. Official Apple iTunes Search API (APPROVED — metadata, exact releaseDate, artwork, and 30s preview)
+        if (!iranNoVpnMode && term.isNotBlank()) {
+            val itunesTracks = itunesAdapter.search(
                 query = term,
+                country = targetCountry,
                 favoriteIds = favoriteIds,
-                countryCode = countryCode ?: "IR"
+                limit = 20
             )
-            if (liveResult.hadNetworkFailure) {
+            if (itunesTracks.isEmpty() && !SourceResolver.isHostHealthy("itunes.apple.com")) {
                 encounteredNetworkError = true
             }
-            fullTracks.addAll(liveResult.tracks)
+            combinedPool.addAll(itunesTracks)
         }
 
-        if (!iranNoVpnMode && term.isNotBlank() && SourceResolver.isHostHealthy("itunes.apple.com")) {
-            try {
-                val itunesResp = itunesApi.searchTracks(
-                    term = term.trim(),
-                    country = countryCode?.takeIf { it != "IR" } ?: "US"
-                )
-                SourceResolver.recordSuccess("https://itunes.apple.com/search")
-                val mappedItunes = itunesResp.results.mapNotNull { dto ->
-                    val title = dto.trackName?.trim().orEmpty()
-                    val artist = dto.artistName?.trim().orEmpty()
-                    val streamUrl = dto.previewUrl?.trim().orEmpty()
-                    if (title.isBlank() || artist.isBlank() || !SourceResolver.isValidStreamUrl(streamUrl)) {
-                        null
-                    } else {
-                        val id = dto.trackId?.let { 2_000_000L + kotlin.math.abs(it) }
-                            ?: IdGenerator.stable64BitId("itunes", streamUrl, offset = 2_000_000L)
-                        val artistId = Track.slugifyArtistId(artist)
-                        val rawCover = dto.artworkUrl100?.replace("100x100bb", "600x600bb") ?: ""
-                        val ownedArt = ArtworkResolver.buildOwnedArtworkOrNull(rawCover, artistId)
-                        Track(
-                            id = id,
-                            title = title,
-                            artist = artist,
-                            album = dto.collectionName?.takeIf { it.isNotBlank() } ?: "Single",
-                            artworkUrl = ownedArt?.url ?: "",
-                            previewUrl = streamUrl,
-                            genre = dto.primaryGenreName ?: "Pop",
-                            durationMs = (dto.trackTimeMillis ?: 0L).coerceAtLeast(0L),
-                            releaseYear = dto.releaseDate?.take(4) ?: "2025",
-                            countryCode = countryCode ?: "US",
-                            isFavorite = favoriteIds.contains(id),
-                            playCount = 95000,
-                            sourceId = "itunes",
-                            artistId = artistId,
-                            artwork = ownedArt
-                        )
-                    }
-                }
-                fullTracks.addAll(mappedItunes)
-            } catch (e: Exception) {
-                encounteredNetworkError = true
-                SourceResolver.recordFailure("https://itunes.apple.com/search")
-                AppLogger.w("searchTracks:itunes", "International iTunes query failed", e)
+        // 3. Internet Archive Open Audio API (CONDITIONAL — open-access full audio streams)
+        if (!iranNoVpnMode && term.isNotBlank()) {
+            val archiveTracks = archiveAdapter.search(
+                query = term,
+                country = targetCountry,
+                favoriteIds = favoriteIds,
+                limit = 4
+            )
+            combinedPool.addAll(archiveTracks)
+        }
+
+        var results = GroupEngine.deduplicateTracks(
+            combinedPool.filter {
+                it.title.isNotBlank() && it.artist.isNotBlank() && SourceResolver.isValidStreamUrl(it.previewUrl)
             }
-        }
-
-        var results = fullTracks
-            .filter { it.title.isNotBlank() && it.artist.isNotBlank() && SourceResolver.isValidStreamUrl(it.previewUrl) }
-            .distinctBy { "${it.id}_${it.previewUrl}" }
+        )
 
         if (!countryCode.isNullOrBlank() && term.isBlank()) {
             results = results.filter { it.countryCode.equals(countryCode, ignoreCase = true) }
@@ -259,119 +302,180 @@ class MusicRepository(
                 cleanTarget.contains(it.artist, ignoreCase = true)
         }.toMutableList()
 
-        if (cleanTarget.isNotBlank() && SourceResolver.isHostHealthy("musics-fa.com")) {
-            val liveArtistResult = fetchLiveFromMusicsFa(
+        // Also enrich artist discography from official iTunes Search when reachable
+        if (cleanTarget.isNotBlank() && SourceResolver.isHostHealthy("itunes.apple.com")) {
+            val liveItunes = itunesAdapter.search(
                 query = cleanTarget,
+                country = CountriesData.usa,
                 favoriteIds = favoriteIds,
-                defaultArtist = cleanTarget
-            )
-            matched.addAll(liveArtistResult.tracks)
+                limit = 12
+            ).filter {
+                it.artistId == targetSlug || it.artist.contains(cleanTarget, ignoreCase = true)
+            }
+            matched.addAll(liveItunes)
         }
 
-        val unique = matched
-            .filter { it.title.isNotBlank() && it.artist.isNotBlank() && SourceResolver.isValidStreamUrl(it.previewUrl) }
-            .distinctBy { it.previewUrl }
+        val unique = GroupEngine.deduplicateTracks(
+            matched.filter {
+                it.title.isNotBlank() && it.artist.isNotBlank() && SourceResolver.isValidStreamUrl(it.previewUrl)
+            }
+        )
 
         when (sortOption) {
-            ArtistSortOption.TRENDING -> unique.sortedByDescending { it.playCount }
-            ArtistSortOption.NEWEST -> unique.sortedByDescending { it.releaseYear.toIntOrNull() ?: 2026 }
-        }
-    }
-
-    private data class LiveFetchResult(
-        val tracks: List<Track>,
-        val hadNetworkFailure: Boolean
-    )
-
-    private fun fetchLiveFromMusicsFa(
-        query: String,
-        favoriteIds: Set<Long>,
-        defaultArtist: String? = null,
-        countryCode: String = "IR"
-    ): LiveFetchResult {
-        val endpoint = "https://musics-fa.com/"
-        return try {
-            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
-            val url = "$endpoint?s=$encoded"
-            val request = Request.Builder()
-                .url(url)
-                .header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                )
-                .build()
-
-            scraperClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    val isHard = response.code in listOf(403, 429, 503)
-                    SourceResolver.recordFailure(endpoint, isHardFailure = isHard)
-                    AppLogger.w("fetchLiveFromMusicsFa", "HTTP ${response.code} for query=$query")
-                    return LiveFetchResult(emptyList(), hadNetworkFailure = true)
-                }
-                val html = response.body?.string().orEmpty()
-                when (val outcome = MusicsFaHtmlParser.parseHtml(html, query, favoriteIds, defaultArtist, countryCode)) {
-                    is MusicsFaHtmlParser.ParseOutcome.Success -> {
-                        SourceResolver.recordSuccess(endpoint)
-                        LiveFetchResult(outcome.tracks, hadNetworkFailure = false)
-                    }
-                    is MusicsFaHtmlParser.ParseOutcome.EmptyResult -> {
-                        SourceResolver.recordSuccess(endpoint)
-                        LiveFetchResult(emptyList(), hadNetworkFailure = false)
-                    }
-                    is MusicsFaHtmlParser.ParseOutcome.CaptchaOrBlocked -> {
-                        SourceResolver.recordFailure(endpoint, isHardFailure = true)
-                        AppLogger.w("fetchLiveFromMusicsFa", "Anti-bot/CAPTCHA challenge detected on musics-fa")
-                        LiveFetchResult(emptyList(), hadNetworkFailure = true)
-                    }
-                    is MusicsFaHtmlParser.ParseOutcome.StructureChanged -> {
-                        AppLogger.w("fetchLiveFromMusicsFa", "DOM structure change: ${outcome.reason}")
-                        LiveFetchResult(emptyList(), hadNetworkFailure = false)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            SourceResolver.recordFailure(endpoint, isHardFailure = false)
-            AppLogger.w("fetchLiveFromMusicsFa", "Network exception fetching live results", e)
-            LiveFetchResult(emptyList(), hadNetworkFailure = true)
+            ArtistSortOption.TRENDING -> unique.sortedWith(
+                compareByDescending<Track> { !it.isPreviewOnly }
+                    .thenByDescending { it.playCount }
+                    .thenBy { it.id }
+            )
+            ArtistSortOption.NEWEST -> unique.sortedWith(
+                compareByDescending<Track> { it.computeReleaseSortKey() }
+                    .thenByDescending { it.datePrecision.weight }
+                    .thenBy { it.id }
+            )
         }
     }
 
     /**
-     * Evaluates New Releases via [GroupEngine] with `perArtistCap = 1` (fixes N-03 & U-03).
+     * Section 2.1, 2.2, and 2.6:
+     * Evaluates Latest Releases for [country] with Stale-While-Revalidate caching (TTL = 30 min),
+     * live provider discovery where available, date-precision ranking, and `perArtistCap = 1`.
      */
-    suspend fun getNewReleasesForCountry(country: Country): List<Track> = withContext(Dispatchers.IO) {
+    suspend fun getNewReleasesForCountry(
+        country: Country,
+        forceRefresh: Boolean = false,
+        iranNoVpnMode: Boolean = true
+    ): List<Track> = withContext(Dispatchers.IO) {
+        val code = country.code.uppercase(Locale.ROOT)
+        val now = System.currentTimeMillis()
+        val existingSnap = newReleasesSnapshots[code]
+
         val favoriteIds = try {
             musicDao.getAllFavoriteIds().first().toSet()
         } catch (e: Exception) {
             AppLogger.w("getNewReleasesForCountry", "Failed reading favorites", e)
             emptySet()
         }
-        val countryTracks = getCuratedTracksForCountry(country, favoriteIds)
-        val group = CatalogDataSource.getDefaultNewReleasesGroup(country.code)
-        GroupEngine.evaluate(
+
+        if (!forceRefresh && existingSnap != null && (now - existingSnap.fetchedAtMs) < NEW_RELEASES_TTL_MS) {
+            return@withContext existingSnap.tracks.map { it.copy(isFavorite = favoriteIds.contains(it.id)) }
+        }
+
+        val curatedTracks = getCuratedTracksForCountry(country, favoriteIds)
+        val liveTracks = if (!iranNoVpnMode && SourceResolver.isHostHealthy("itunes.apple.com")) {
+            itunesAdapter.fetchLatestReleases(country, favoriteIds, limit = 10)
+        } else {
+            emptyList()
+        }
+
+        val mergedPool = GroupEngine.deduplicateTracks(curatedTracks + liveTracks)
+        val group = CatalogDataSource.getDefaultNewReleasesGroup(code)
+        val evaluated = GroupEngine.evaluate(
             group = group,
-            tracks = countryTracks,
+            tracks = mergedPool,
             artists = CatalogDataSource.getArtistsById()
         )
+
+        val finalTracks = if (evaluated.isNotEmpty()) {
+            evaluated
+        } else {
+            existingSnap?.tracks ?: curatedTracks.take(10)
+        }
+
+        newReleasesSnapshots[code] = HomeSectionSnapshot(
+            tracks = finalTracks,
+            fetchedAtMs = now,
+            hasLiveProviderItems = liveTracks.isNotEmpty()
+        )
+        finalTracks
     }
 
     /**
-     * Evaluates Trending tracks via [GroupEngine].
+     * Section 2.1, 2.3, and 2.6:
+     * Evaluates Popular / Editor Picks for [country] with Stale-While-Revalidate caching (TTL = 15 min),
+     * cross-shelf deduplication against [excludeTrackIds], and honest popularity attribution.
      */
-    suspend fun getTrendingForCountry(country: Country): List<Track> = withContext(Dispatchers.IO) {
+    suspend fun getTrendingForCountry(
+        country: Country,
+        forceRefresh: Boolean = false,
+        iranNoVpnMode: Boolean = true,
+        excludeTrackIds: Set<Long> = emptySet()
+    ): List<Track> = withContext(Dispatchers.IO) {
+        val code = country.code.uppercase(Locale.ROOT)
+        val now = System.currentTimeMillis()
+        val existingSnap = trendingSnapshots[code]
+
         val favoriteIds = try {
             musicDao.getAllFavoriteIds().first().toSet()
         } catch (e: Exception) {
             AppLogger.w("getTrendingForCountry", "Failed reading favorites", e)
             emptySet()
         }
-        val countryTracks = getCuratedTracksForCountry(country, favoriteIds)
-        val group = CatalogDataSource.getDefaultTrendingGroup(country.code)
-        GroupEngine.evaluate(
+
+        if (!forceRefresh && existingSnap != null && (now - existingSnap.fetchedAtMs) < TRENDING_TTL_MS) {
+            val cached = existingSnap.tracks.map { it.copy(isFavorite = favoriteIds.contains(it.id)) }
+            val deduped = if (excludeTrackIds.isNotEmpty()) {
+                cached.filter { it.id !in excludeTrackIds }.ifEmpty { cached }
+            } else {
+                cached
+            }
+            return@withContext deduped
+        }
+
+        val curatedTracks = getCuratedTracksForCountry(country, favoriteIds)
+        val livePopular = if (!iranNoVpnMode && SourceResolver.isHostHealthy("itunes.apple.com")) {
+            itunesAdapter.fetchPopularTracks(country, favoriteIds, limit = 10)
+        } else {
+            emptyList()
+        }
+
+        val mergedPool = GroupEngine.deduplicateTracks(curatedTracks + livePopular)
+        val group = CatalogDataSource.getDefaultTrendingGroup(code)
+        val evaluatedDedup = GroupEngine.evaluate(
             group = group,
-            tracks = countryTracks,
-            artists = CatalogDataSource.getArtistsById()
+            tracks = mergedPool,
+            artists = CatalogDataSource.getArtistsById(),
+            excludeTrackIds = excludeTrackIds
         )
+        val evaluated = if (evaluatedDedup.isNotEmpty()) {
+            evaluatedDedup
+        } else {
+            GroupEngine.evaluate(
+                group = group,
+                tracks = mergedPool,
+                artists = CatalogDataSource.getArtistsById()
+            )
+        }
+
+        val finalTracks = evaluated.mapIndexed { idx, track ->
+            val rank = idx + 1
+            val signal = if (track.contentOrigin == ContentOrigin.LIVE_PROVIDER) {
+                PopularitySignal(
+                    sourceId = track.sourceId,
+                    labelFa = "محبوب در ${track.sourceLabelFa} #$rank",
+                    labelEn = "${track.sourceLabelEn} Top #$rank",
+                    rank = rank,
+                    retrievedAtMs = now,
+                    isVerifiedLiveSignal = true
+                )
+            } else {
+                PopularitySignal(
+                    sourceId = "curated",
+                    labelFa = "منتخب کاتالوگ #$rank",
+                    labelEn = "Editor Pick #$rank",
+                    rank = rank,
+                    retrievedAtMs = now,
+                    isVerifiedLiveSignal = false
+                )
+            }
+            track.copy(popularitySignal = signal)
+        }
+
+        trendingSnapshots[code] = HomeSectionSnapshot(
+            tracks = finalTracks,
+            fetchedAtMs = now,
+            hasLiveProviderItems = livePopular.isNotEmpty()
+        )
+        finalTracks
     }
 
     suspend fun getTracksForMood(moodQuery: String, countryCode: String): List<Track> = withContext(Dispatchers.IO) {
@@ -600,19 +704,43 @@ class MusicRepository(
     }
 
     fun getCuratedTracksForCountry(country: Country, favoriteIds: Set<Long>): List<Track> {
-        val code = country.code.uppercase()
+        val code = country.code.uppercase(Locale.ROOT)
         return CatalogDataSource.getTracks()
             .filter { it.countryCode.equals(code, ignoreCase = true) }
-            .map { it.copy(isFavorite = favoriteIds.contains(it.id)) }
+            .map { decorateCuratedCatalogTrack(it, favoriteIds) }
     }
 
     fun getAllCuratedFullTracks(favoriteIds: Set<Long> = emptySet()): List<Track> {
         return CatalogDataSource.getTracks()
-            .map { it.copy(isFavorite = favoriteIds.contains(it.id)) }
+            .map { decorateCuratedCatalogTrack(it, favoriteIds) }
+    }
+
+    private fun decorateCuratedCatalogTrack(track: Track, favoriteIds: Set<Long>): Track {
+        val yearClean = track.releaseYear.take(4)
+        return track.copy(
+            isFavorite = favoriteIds.contains(track.id),
+            releaseDateIso = yearClean,
+            datePrecision = DatePrecision.YEAR,
+            releaseKind = if (track.album.equals("Single", ignoreCase = true)) ReleaseKind.SINGLE else ReleaseKind.ALBUM,
+            contentOrigin = ContentOrigin.CURATED_CATALOG,
+            sourceLabelFa = "آرشیو منتخب",
+            sourceLabelEn = "Curated Catalog",
+            isPreviewOnly = false,
+            popularitySignal = PopularitySignal(
+                sourceId = "curated",
+                labelFa = "منتخب کاتالوگ",
+                labelEn = "Curated Pick",
+                rank = null,
+                isVerifiedLiveSignal = false
+            )
+        )
     }
 
     companion object {
         const val CACHE_TTL_MS = 5 * 60 * 1000L
+        const val TRENDING_TTL_MS = 15 * 60 * 1000L
+        const val NEW_RELEASES_TTL_MS = 30 * 60 * 1000L
+        const val BANNERS_TTL_MS = 6 * 60 * 60 * 1000L
         const val MAX_CACHE_ENTRIES = 40
     }
 }

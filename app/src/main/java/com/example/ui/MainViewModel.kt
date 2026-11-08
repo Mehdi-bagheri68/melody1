@@ -65,6 +65,7 @@ class MainViewModel : ViewModel() {
     val googleDriveWebhookUrl: StateFlow<String> = userPreferences.googleDriveWebhookUrl
     val onboardingCompleted: StateFlow<Boolean> = userPreferences.onboardingCompleted
     val loginLogs: StateFlow<List<UserLoginLog>> = userPreferences.loginLogs
+    val telemetryConsentGranted: StateFlow<Boolean> = userPreferences.telemetryConsentGranted
 
     private val _isAdminUnlocked = MutableStateFlow(
         userPreferences.userProfile.value?.isAdminUser == true
@@ -129,6 +130,17 @@ class MainViewModel : ViewModel() {
         CountriesData.getMoodCategoriesForCountry(initialCountry)
     )
     val moodCategories: StateFlow<List<MoodCategory>> = _moodCategories.asStateFlow()
+
+    private val _editorialBanners = MutableStateFlow(
+        repository.getEditorialBannersForCountry(initialCountry)
+    )
+    val editorialBanners: StateFlow<List<com.example.data.provider.EditorialBanner>> = _editorialBanners.asStateFlow()
+
+    private val _homeLastUpdatedMs = MutableStateFlow(System.currentTimeMillis())
+    val homeLastUpdatedMs: StateFlow<Long> = _homeLastUpdatedMs.asStateFlow()
+
+    private val _isLiveProviderBacked = MutableStateFlow(false)
+    val isLiveProviderBacked: StateFlow<Boolean> = _isLiveProviderBacked.asStateFlow()
 
     // Synchronously initialized on frame 0 via GroupEngine so there is zero empty state or LTR/RTL layout jump
     private val _trendingTracks = MutableStateFlow<List<Track>>(
@@ -240,9 +252,34 @@ class MainViewModel : ViewModel() {
     private var searchJob: Job? = null
 
     init {
-        loadTrendingForCountry(_selectedCountry.value)
+        loadTrendingForCountry(_selectedCountry.value, forceRefresh = false)
         startTrialExpirationMonitor()
         recordStartupTelemetryIfActive()
+    }
+
+    /**
+     * Section 2.1 & 2.6: Called when the app returns to foreground (ON_START).
+     * Refreshes Home feed sections only if their TTL has expired.
+     */
+    fun onAppForegrounded() {
+        val country = _selectedCountry.value
+        if (repository.isHomeSectionExpired(country.code)) {
+            loadTrendingForCountry(country, forceRefresh = false)
+        }
+    }
+
+    /**
+     * Section 2.1: Explicit user-initiated refresh on HomeScreen.
+     */
+    fun refreshHomeFeed() {
+        loadTrendingForCountry(_selectedCountry.value, forceRefresh = true)
+    }
+
+    fun setTelemetryConsentGranted(granted: Boolean) {
+        userPreferences.setTelemetryConsentGranted(granted)
+        if (granted) {
+            recordStartupTelemetryIfActive()
+        }
     }
 
     private fun recordStartupTelemetryIfActive() {
@@ -253,9 +290,7 @@ class MainViewModel : ViewModel() {
 
             when {
                 profile != null && profile.isAuthenticated -> {
-                    if (profile.isAdminUser) {
-                        _isAdminUnlocked.value = true
-                    }
+                    _isAdminUnlocked.value = profile.isAdminUser
                     driveStorageService.recordUserSessionTelemetry(
                         userId = profile.uid,
                         accountUsername = profile.email.ifBlank { profile.displayName },
@@ -279,17 +314,9 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun unlockAdminPanel(pin: String): Boolean {
-        val ok = pin.trim() == com.example.data.model.AppConfig.ADMIN_ACCESS_PIN ||
-            userPreferences.userProfile.value?.isAdminUser == true
-        if (ok) {
-            _isAdminUnlocked.value = true
-        }
-        return ok
-    }
-
     fun refreshAdminTelemetryLogs() {
         viewModelScope.launch {
+            if (userPreferences.userProfile.value?.isAdminUser != true) return@launch
             _isSyncingDrive.value = true
             try {
                 val flushed = driveStorageService.flushPendingTelemetryQueue()
@@ -316,7 +343,7 @@ class MainViewModel : ViewModel() {
         }
         return when {
             profile == null || !profile.isAuthenticated -> Screen.Login
-            !profile.isPhoneVerifiedStrict -> Screen.PhoneVerification
+            !profile.canProceedPastPhoneStep -> Screen.PhoneVerification
             !profile.isCountrySelectedStrict || !onboardingDone -> Screen.Onboarding
             else -> Screen.Home
         }
@@ -434,15 +461,14 @@ class MainViewModel : ViewModel() {
                     userPreferences.setOnboardingCompleted(true)
                     _selectedCountry.value = restoredCountry
                     _moodCategories.value = CountriesData.getMoodCategoriesForCountry(restoredCountry)
+                    _editorialBanners.value = repository.getEditorialBannersForCountry(restoredCountry)
                     _trendingTracks.value = repository.getInitialTrendingSync(restoredCountry)
                     _newReleaseTracks.value = repository.getInitialNewReleasesSync(restoredCountry)
-                    loadTrendingForCountry(restoredCountry)
+                    loadTrendingForCountry(restoredCountry, forceRefresh = false)
                 }
 
                 // Strict Onboarding Guard routing
-                if (syncedProfile.isAdminUser) {
-                    _isAdminUnlocked.value = true
-                }
+                _isAdminUnlocked.value = syncedProfile.isAdminUser
                 driveStorageService.recordUserSessionTelemetry(
                     userId = syncedProfile.uid,
                     accountUsername = syncedProfile.email.ifBlank { syncedProfile.displayName },
@@ -450,7 +476,7 @@ class MainViewModel : ViewModel() {
                     status = "Active"
                 )
                 _currentScreen.value = when {
-                    !syncedProfile.isPhoneVerifiedStrict -> Screen.PhoneVerification
+                    !syncedProfile.canProceedPastPhoneStep -> Screen.PhoneVerification
                     !syncedProfile.isCountrySelectedStrict -> Screen.Onboarding
                     else -> Screen.Home
                 }
@@ -486,7 +512,8 @@ class MainViewModel : ViewModel() {
     }
 
     /**
-     * Step 3 (Part A): Request a 6-digit OTP for the user's mobile phone number.
+     * Step 3 (Part A): Request an SMS OTP for the user's mobile phone number.
+     * Reports `BLOCKED_NO_BACKEND` honestly when no real SMS gateway is configured.
      */
     fun requestPhoneOtp(dialCode: String, rawPhone: String) {
         viewModelScope.launch {
@@ -500,19 +527,48 @@ class MainViewModel : ViewModel() {
                     email = email,
                     mode = otpMode.value
                 )
-                if (result.success) {
-                    _generatedFallbackOtp.value = result.generatedCodeForFallbackOrTest
-                    _otpStatusBanner.value = if (appLanguage.value == AppLanguage.FA) {
-                        result.messageFa
-                    } else {
-                        result.messageEn
-                    }
+                _generatedFallbackOtp.value = null
+                val msg = if (appLanguage.value == AppLanguage.FA) result.messageFa else result.messageEn
+                if (result.success || result.status == com.example.data.model.OtpVerificationStatus.BLOCKED_NO_BACKEND) {
+                    _otpStatusBanner.value = msg
                 } else {
-                    _authErrorMessage.value = if (appLanguage.value == AppLanguage.FA) {
-                        result.messageFa
-                    } else {
-                        result.messageEn
-                    }
+                    _authErrorMessage.value = msg
+                }
+            } finally {
+                _isSyncingDrive.value = false
+            }
+        }
+    }
+
+    /**
+     * Section 4.1: Honest continuation path when SMS verification is `BLOCKED_NO_BACKEND`.
+     * Records `phoneVerified = false` and `phoneVerificationBypassedNoBackend = true` (never faking verification).
+     */
+    fun continueWithoutSmsVerification(dialCode: String, rawPhone: String) {
+        viewModelScope.launch {
+            _isSyncingDrive.value = true
+            _authErrorMessage.value = null
+            try {
+                val normalized = if (rawPhone.isNotBlank() &&
+                    com.example.data.model.AppConfig.isValidPhoneNumber(dialCode, rawPhone)
+                ) {
+                    com.example.data.model.AppConfig.normalizePhoneNumber(dialCode, rawPhone)
+                } else {
+                    ""
+                }
+                val current = userProfile.value ?: UserProfile()
+                val updated = current.copy(
+                    phoneNumber = normalized,
+                    phoneVerified = false,
+                    phoneVerificationBypassedNoBackend = true
+                )
+                val outcome = driveStorageService.saveOrUpdateUserProfile(updated)
+                _generatedFallbackOtp.value = null
+                _otpStatusBanner.value = null
+                if (!outcome.profile.isCountrySelectedStrict || !userPreferences.onboardingCompleted.value) {
+                    _currentScreen.value = Screen.Onboarding
+                } else {
+                    _currentScreen.value = Screen.Home
                 }
             } finally {
                 _isSyncingDrive.value = false
@@ -529,16 +585,25 @@ class MainViewModel : ViewModel() {
             _isSyncingDrive.value = true
             _authErrorMessage.value = null
             try {
-                val verified = driveStorageService.verifyOtp(
+                val status = driveStorageService.verifyOtpDetailed(
                     normalizedPhone = normalizedPhone,
                     enteredCode = enteredCode,
                     mode = otpMode.value
                 )
-                if (!verified) {
-                    _authErrorMessage.value = if (appLanguage.value == AppLanguage.FA) {
-                        "کد تایید ۶ رقمی وارد شده صحیح نیست یا منقضی شده است."
-                    } else {
-                        "Invalid or expired 6-digit verification code."
+                if (status != com.example.data.model.OtpVerificationStatus.VERIFIED) {
+                    _authErrorMessage.value = when (status) {
+                        com.example.data.model.OtpVerificationStatus.MAX_ATTEMPTS_EXCEEDED ->
+                            if (appLanguage.value == AppLanguage.FA) {
+                                "تعداد تلاش‌های ناموفق بیش از حد مجاز (۵ بار) است. لطفاً کد جدید درخواست کنید."
+                            } else {
+                                "Maximum verification attempts (5) exceeded. Please request a new code."
+                            }
+                        else ->
+                            if (appLanguage.value == AppLanguage.FA) {
+                                "کد تایید ۶ رقمی وارد شده صحیح نیست یا درگاه پیامکی (BLOCKED_NO_BACKEND) فعال نیست."
+                            } else {
+                                "Invalid/expired 6-digit code or SMS gateway is BLOCKED_NO_BACKEND."
+                            }
                     }
                     return@launch
                 }
@@ -546,7 +611,8 @@ class MainViewModel : ViewModel() {
                 val current = userProfile.value ?: UserProfile()
                 val updated = current.copy(
                     phoneNumber = normalizedPhone,
-                    phoneVerified = true
+                    phoneVerified = true,
+                    phoneVerificationBypassedNoBackend = false
                 )
                 val outcome = driveStorageService.saveOrUpdateUserProfile(updated)
                 driveStorageService.recordUserSessionTelemetry(
@@ -701,6 +767,7 @@ class MainViewModel : ViewModel() {
             repository.clearSearchCache()
             authRepository.signOut()
             userPreferences.clearAuthSession()
+            _isAdminUnlocked.value = false
             _generatedFallbackOtp.value = null
             _otpStatusBanner.value = null
             clearAuthMessages()
@@ -716,6 +783,7 @@ class MainViewModel : ViewModel() {
             repository.clearSearchCache()
             authRepository.deleteAccount()
             userPreferences.clearAuthSession()
+            _isAdminUnlocked.value = false
             _generatedFallbackOtp.value = null
             _otpStatusBanner.value = null
             clearAuthMessages()
@@ -732,6 +800,7 @@ class MainViewModel : ViewModel() {
         playerController.setIranNoVpnMode(enabled)
         viewModelScope.launch {
             repository.clearSearchCache()
+            loadTrendingForCountry(_selectedCountry.value, forceRefresh = true)
             if (_searchQuery.value.isNotBlank() || _searchGenreFilter.value != null ||
                 _searchYearFilter.value != null || _searchCountryFilter.value != null
             ) {
@@ -795,12 +864,13 @@ class MainViewModel : ViewModel() {
         userPreferences.setOnboardingCompleted(true)
         _selectedCountry.value = country
         _moodCategories.value = CountriesData.getMoodCategoriesForCountry(country)
+        _editorialBanners.value = repository.getEditorialBannersForCountry(country)
         _trendingTracks.value = repository.getInitialTrendingSync(country)
         _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
         _activeMood.value = null
         _moodTracks.value = emptyList()
         _currentScreen.value = Screen.Home
-        loadTrendingForCountry(country)
+        loadTrendingForCountry(country, forceRefresh = false)
 
         viewModelScope.launch {
             val current = userProfile.value ?: return@launch
@@ -814,6 +884,7 @@ class MainViewModel : ViewModel() {
         _selectedCountry.value = country
         val newCountryMoods = CountriesData.getMoodCategoriesForCountry(country)
         _moodCategories.value = newCountryMoods
+        _editorialBanners.value = repository.getEditorialBannersForCountry(country)
         _trendingTracks.value = repository.getInitialTrendingSync(country)
         _newReleaseTracks.value = repository.getInitialNewReleasesSync(country)
         _isCountryPickerVisible.value = false
@@ -827,7 +898,7 @@ class MainViewModel : ViewModel() {
             _isLoadingMood.value = false
         }
 
-        loadTrendingForCountry(country)
+        loadTrendingForCountry(country, forceRefresh = false)
 
         // Also update the user's selectedCountry in Admin Google Drive + local cache
         viewModelScope.launch {
@@ -837,23 +908,64 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun loadTrendingForCountry(country: Country) {
+    fun onEditorialBannerClick(banner: com.example.data.provider.EditorialBanner) {
+        when (banner.actionType) {
+            com.example.data.provider.EditorialBannerActionType.MOOD -> {
+                val targetMood = _moodCategories.value.find {
+                    it.id.equals(banner.actionTarget, ignoreCase = true) ||
+                        it.query.equals(banner.actionTarget, ignoreCase = true)
+                }
+                if (targetMood != null) {
+                    selectMood(targetMood)
+                }
+            }
+            com.example.data.provider.EditorialBannerActionType.COUNTRY -> {
+                val targetCountry = CountriesData.getCountryByCode(banner.actionTarget)
+                selectCountry(targetCountry)
+            }
+            com.example.data.provider.EditorialBannerActionType.SEARCH -> {
+                onSearchQueryChanged(banner.actionTarget)
+                navigateTo(Screen.Search)
+            }
+            com.example.data.provider.EditorialBannerActionType.ARTIST -> {
+                openArtistDetail(banner.actionTarget)
+            }
+        }
+    }
+
+    fun loadTrendingForCountry(country: Country, forceRefresh: Boolean = false) {
         trendingJob?.cancel()
         trendingJob = viewModelScope.launch {
             _isLoadingTrending.value = true
             _trendingErrorMessage.value = null
             try {
-                val tracks = repository.getTrendingForCountry(country)
-                val newest = repository.getNewReleasesForCountry(country)
+                val noVpn = userPreferences.iranNoVpnMode.value
+                val newest = repository.getNewReleasesForCountry(
+                    country = country,
+                    forceRefresh = forceRefresh,
+                    iranNoVpnMode = noVpn
+                )
+                val newestIds = newest.map { it.id }.toSet()
+                val tracks = repository.getTrendingForCountry(
+                    country = country,
+                    forceRefresh = forceRefresh,
+                    iranNoVpnMode = noVpn,
+                    excludeTrackIds = newestIds
+                )
+                val banners = repository.getEditorialBannersForCountry(country)
                 if (_selectedCountry.value.code == country.code) {
-                    _trendingTracks.value = tracks
-                    _newReleaseTracks.value = newest
+                    if (newest.isNotEmpty()) _newReleaseTracks.value = newest
+                    if (tracks.isNotEmpty()) _trendingTracks.value = tracks
+                    _editorialBanners.value = banners
+                    _homeLastUpdatedMs.value = repository.getHomeLastUpdatedMs(country.code)
+                        .takeIf { it > 0L } ?: System.currentTimeMillis()
+                    _isLiveProviderBacked.value = repository.hasLiveProviderItems(country.code)
                 }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {
                 AppLogger.w("loadTrendingForCountry", "Error loading trending for ${country.code}", e)
-                if (_selectedCountry.value.code == country.code) {
+                if (_selectedCountry.value.code == country.code && _trendingTracks.value.isEmpty()) {
                     _trendingErrorMessage.value = e.localizedMessage ?: "Error loading tracks"
                 }
             } finally {

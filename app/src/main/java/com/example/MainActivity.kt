@@ -66,6 +66,11 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    override fun onStart() {
+        super.onStart()
+        viewModel.onAppForegrounded()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -132,6 +137,7 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val driveSyncStatusMessage by viewModel.driveSyncStatusMessage.collectAsState()
     val loginLogs by viewModel.loginLogs.collectAsState()
     val isAdminUnlocked by viewModel.isAdminUnlocked.collectAsState()
+    val telemetryConsentGranted by viewModel.telemetryConsentGranted.collectAsState()
 
     // 3-Day Free Trial State (v1.9.0)
     val trialStartedAtMs by viewModel.trialStartedAtMs.collectAsState()
@@ -139,6 +145,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val trialRemainingMs by viewModel.trialRemainingMs.collectAsState()
     val isTrialExpired by viewModel.isTrialExpired.collectAsState()
 
+    val editorialBanners by viewModel.editorialBanners.collectAsState()
+    val homeLastUpdatedMs by viewModel.homeLastUpdatedMs.collectAsState()
+    val isLiveProviderBacked by viewModel.isLiveProviderBacked.collectAsState()
     val trendingTracks by viewModel.trendingTracks.collectAsState()
     val newReleaseTracks by viewModel.newReleaseTracks.collectAsState()
     val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
@@ -186,11 +195,6 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
 
     // =========================================================================
     // STRICT ONBOARDING GUARD (5-Stage Mandatory Flow)
-    // Stage 1: Check Google Authentication (`isAuthenticated`)
-    // Stage 2: Sync User Profile from Admin Google Drive (`syncUserFromDrive`)
-    // Stage 3: Mandatory Phone Verification (`isPhoneVerifiedStrict`)
-    // Stage 4: Country Selection (`isCountrySelectedStrict` & `onboardingCompleted`)
-    // Stage 5: Main Music Player & User Profile Management
     // =========================================================================
     val activeProfile = userProfile
     val hasValidTrialAccess = isTrialSessionActive && !isTrialExpired
@@ -198,7 +202,7 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
 
     val mustShowGoogleLogin = (!hasAuthenticatedAccount && !hasValidTrialAccess) || currentScreen is Screen.Login
     val mustShowPhoneVerification = !mustShowGoogleLogin && !hasValidTrialAccess &&
-        (!activeProfile!!.isPhoneVerifiedStrict || currentScreen is Screen.PhoneVerification)
+        (!activeProfile!!.canProceedPastPhoneStep || currentScreen is Screen.PhoneVerification)
     val mustShowCountrySelection = !mustShowGoogleLogin && !mustShowPhoneVerification &&
         ((!hasValidTrialAccess && !activeProfile!!.isCountrySelectedStrict) || !onboardingCompleted || currentScreen is Screen.Onboarding)
 
@@ -230,8 +234,7 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
             }
 
             mustShowPhoneVerification -> {
-                // Only allow BackHandler if the user already verified their phone and opened this screen from Profile
-                if (activeProfile?.isPhoneVerifiedStrict == true) {
+                if (activeProfile?.canProceedPastPhoneStep == true) {
                     BackHandler {
                         viewModel.navigateTo(Screen.Profile)
                     }
@@ -249,6 +252,9 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                     },
                     onVerifyOtp = { normalizedPhone, code ->
                         viewModel.verifyPhoneOtp(normalizedPhone, code)
+                    },
+                    onContinueWithoutSmsBackend = { dialCode, rawPhone ->
+                        viewModel.continueWithoutSmsVerification(dialCode, rawPhone)
                     },
                     onSignOutAccount = {
                         viewModel.signOut()
@@ -377,7 +383,12 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                     onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
                                     onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
                                     trendingErrorMessage = trendingErrorMessage,
-                                    onRetryTrending = { viewModel.loadTrendingForCountry(selectedCountry) }
+                                    onRetryTrending = { viewModel.refreshHomeFeed() },
+                                    editorialBanners = editorialBanners,
+                                    onEditorialBannerClick = { banner -> viewModel.onEditorialBannerClick(banner) },
+                                    homeLastUpdatedMs = homeLastUpdatedMs,
+                                    isLiveProviderBacked = isLiveProviderBacked,
+                                    onRefreshHome = { viewModel.refreshHomeFeed() }
                                 )
                             }
 
@@ -489,7 +500,10 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
                                     isSyncing = isSyncingDrive,
                                     syncStatusMessage = driveSyncStatusMessage,
                                     isAdminUnlocked = isAdminUnlocked,
-                                    onUnlockAdminPin = { pin -> viewModel.unlockAdminPanel(pin) },
+                                    telemetryConsentGranted = telemetryConsentGranted,
+                                    onToggleTelemetryConsent = { granted ->
+                                        viewModel.setTelemetryConsentGranted(granted)
+                                    },
                                     onOpenAdminDashboard = { viewModel.navigateTo(Screen.AdminDashboard) },
                                     onBack = { viewModel.navigateTo(Screen.Home) },
                                     onSaveProfile = { displayName, bio, genres ->
