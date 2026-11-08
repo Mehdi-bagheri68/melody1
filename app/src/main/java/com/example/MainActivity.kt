@@ -28,23 +28,15 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.unit.dp
 import com.example.ui.AppStrings.tr
 import com.example.ui.LocalAppLanguage
 import com.example.ui.MainViewModel
@@ -53,22 +45,21 @@ import com.example.ui.components.AddToPlaylistDialog
 import com.example.ui.components.CountryPickerDialog
 import com.example.ui.components.CreatePlaylistDialog
 import com.example.ui.components.FullPlayerSheet
+import com.example.ui.components.GlassyBottomNavBar
 import com.example.ui.components.MiniPlayer
 import com.example.ui.screens.ArtistDetailScreen
-import com.example.ui.screens.AuthMode
-import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DrivingModeScreen
+import com.example.ui.screens.GoogleLoginScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LibraryScreen
 import com.example.ui.screens.OnboardingScreen
+import com.example.ui.screens.PhoneVerificationScreen
 import com.example.ui.screens.PlaylistDetailScreen
+import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsScreen
-import com.example.ui.theme.AccentGold
 import com.example.ui.theme.MeloGrooveTheme
 import com.example.ui.theme.OledBackground
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
 
 class MainActivity : ComponentActivity() {
 
@@ -127,9 +118,23 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val appLanguage by viewModel.appLanguage.collectAsState()
     val iranNoVpnMode by viewModel.iranNoVpnMode.collectAsState()
     val authState by viewModel.authState.collectAsState()
-    val isAuthLoading by viewModel.isAuthLoading.collectAsState()
     val authErrorMessage by viewModel.authErrorMessage.collectAsState()
-    val authInfoMessage by viewModel.authInfoMessage.collectAsState()
+
+    // Strict Onboarding Guard & Google Drive Profile State (v1.8.0)
+    val userProfile by viewModel.userProfile.collectAsState()
+    val otpMode by viewModel.otpMode.collectAsState()
+    val googleDriveWebhookUrl by viewModel.googleDriveWebhookUrl.collectAsState()
+    val onboardingCompleted by viewModel.onboardingCompleted.collectAsState()
+    val isSyncingDrive by viewModel.isSyncingDrive.collectAsState()
+    val generatedFallbackOtp by viewModel.generatedFallbackOtp.collectAsState()
+    val otpStatusBanner by viewModel.otpStatusBanner.collectAsState()
+    val driveSyncStatusMessage by viewModel.driveSyncStatusMessage.collectAsState()
+
+    // 3-Day Free Trial State (v1.9.0)
+    val trialStartedAtMs by viewModel.trialStartedAtMs.collectAsState()
+    val isTrialSessionActive by viewModel.isTrialSessionActive.collectAsState()
+    val trialRemainingMs by viewModel.trialRemainingMs.collectAsState()
+    val isTrialExpired by viewModel.isTrialExpired.collectAsState()
 
     val trendingTracks by viewModel.trendingTracks.collectAsState()
     val newReleaseTracks by viewModel.newReleaseTracks.collectAsState()
@@ -175,306 +180,357 @@ fun MeloGrooveMainContent(viewModel: MainViewModel) {
     val trackForPlaylist by viewModel.trackForPlaylist.collectAsState()
 
     val layoutDirection = if (appLanguage.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
-    val isAuthScreen = currentScreen is Screen.Login ||
-        currentScreen is Screen.Register ||
-        currentScreen is Screen.ForgotPassword ||
-        currentScreen is Screen.VerifyEmail
+
+    // =========================================================================
+    // STRICT ONBOARDING GUARD (5-Stage Mandatory Flow)
+    // Stage 1: Check Google Authentication (`isAuthenticated`)
+    // Stage 2: Sync User Profile from Admin Google Drive (`syncUserFromDrive`)
+    // Stage 3: Mandatory Phone Verification (`isPhoneVerifiedStrict`)
+    // Stage 4: Country Selection (`isCountrySelectedStrict` & `onboardingCompleted`)
+    // Stage 5: Main Music Player & User Profile Management
+    // =========================================================================
+    val activeProfile = userProfile
+    val hasValidTrialAccess = isTrialSessionActive && !isTrialExpired
+    val hasAuthenticatedAccount = activeProfile != null && activeProfile.isAuthenticated
+
+    val mustShowGoogleLogin = (!hasAuthenticatedAccount && !hasValidTrialAccess) || currentScreen is Screen.Login
+    val mustShowPhoneVerification = !mustShowGoogleLogin && !hasValidTrialAccess &&
+        (!activeProfile!!.isPhoneVerifiedStrict || currentScreen is Screen.PhoneVerification)
+    val mustShowCountrySelection = !mustShowGoogleLogin && !mustShowPhoneVerification &&
+        ((!hasValidTrialAccess && !activeProfile!!.isCountrySelectedStrict) || !onboardingCompleted || currentScreen is Screen.Onboarding)
 
     CompositionLocalProvider(
         LocalLayoutDirection provides layoutDirection,
         LocalAppLanguage provides appLanguage
     ) {
-        // Back handler for sub-screens
-        if (currentScreen !is Screen.Home && currentScreen !is Screen.Onboarding) {
-            BackHandler {
-                viewModel.navigateTo(Screen.Home)
-            }
-        }
-
-        if (currentScreen is Screen.Onboarding) {
-            OnboardingScreen(
-                onSelectAndProceed = { country ->
-                    viewModel.completeOnboarding(country)
-                }
-            )
-        } else if (isAuthScreen) {
-            val authMode = when (currentScreen) {
-                is Screen.Register -> AuthMode.REGISTER
-                is Screen.ForgotPassword -> AuthMode.FORGOT_PASSWORD
-                is Screen.VerifyEmail -> AuthMode.VERIFY_EMAIL
-                else -> AuthMode.LOGIN
-            }
-            AuthScreen(
-                mode = authMode,
-                isLoading = isAuthLoading,
-                errorMessage = authErrorMessage,
-                infoMessage = authInfoMessage,
-                onModeChange = { newMode ->
-                    when (newMode) {
-                        AuthMode.LOGIN -> viewModel.navigateTo(Screen.Login)
-                        AuthMode.REGISTER -> viewModel.navigateTo(Screen.Register)
-                        AuthMode.FORGOT_PASSWORD -> viewModel.navigateTo(Screen.ForgotPassword)
-                        AuthMode.VERIFY_EMAIL -> viewModel.navigateTo(Screen.VerifyEmail)
+        when {
+            mustShowGoogleLogin -> {
+                GoogleLoginScreen(
+                    isSyncing = isSyncingDrive,
+                    errorMessage = authErrorMessage,
+                    trialStartedAtMs = trialStartedAtMs,
+                    trialRemainingMs = trialRemainingMs,
+                    isTrialExpired = isTrialExpired,
+                    onStartTrialClick = {
+                        viewModel.startThreeDayTrial()
+                    },
+                    onGoogleLoginSuccess = { uid, email, displayName, photoUrl ->
+                        viewModel.onGoogleSignedIn(uid, email, displayName, photoUrl)
+                    },
+                    onGoogleLoginError = { msg ->
+                        viewModel.setAuthErrorMessage(msg)
+                    },
+                    onToggleLanguage = { lang ->
+                        viewModel.setAppLanguage(lang)
                     }
-                },
-                onLoginSubmit = { email, password -> viewModel.loginWithEmail(email, password) },
-                onRegisterSubmit = { email, password, name -> viewModel.registerWithEmail(email, password, name) },
-                onForgotPasswordSubmit = { email, newPass -> viewModel.resetPasswordWithEmail(email, newPass) },
-                onVerifyEmailSubmit = { code -> viewModel.verifyEmailCode(code) },
-                onContinueToHome = { viewModel.navigateTo(Screen.Home) }
-            )
-        } else {
-            Scaffold(
-                bottomBar = {
-                    if (currentScreen !is Screen.Driving) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .windowInsetsPadding(WindowInsets.navigationBars)
-                        ) {
-                            // Floating Mini Player (visible if track is active)
-                            AnimatedVisibility(
-                                visible = currentTrack != null,
-                                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                )
+            }
+
+            mustShowPhoneVerification -> {
+                // Only allow BackHandler if the user already verified their phone and opened this screen from Profile
+                if (activeProfile?.isPhoneVerifiedStrict == true) {
+                    BackHandler {
+                        viewModel.navigateTo(Screen.Profile)
+                    }
+                }
+                PhoneVerificationScreen(
+                    userProfile = activeProfile,
+                    otpMode = otpMode,
+                    isBusy = isSyncingDrive,
+                    generatedFallbackOtp = generatedFallbackOtp,
+                    statusBannerMessage = otpStatusBanner,
+                    errorMessage = authErrorMessage,
+                    onOtpModeChange = { mode -> viewModel.setOtpMode(mode) },
+                    onRequestOtp = { dialCode, rawPhone ->
+                        viewModel.requestPhoneOtp(dialCode, rawPhone)
+                    },
+                    onVerifyOtp = { normalizedPhone, code ->
+                        viewModel.verifyPhoneOtp(normalizedPhone, code)
+                    },
+                    onSignOutAccount = {
+                        viewModel.signOut()
+                    }
+                )
+            }
+
+            mustShowCountrySelection -> {
+                OnboardingScreen(
+                    onSelectAndProceed = { country ->
+                        viewModel.completeOnboarding(country)
+                    }
+                )
+            }
+
+            else -> {
+                // Back handler for sub-screens inside Main Music Player
+                if (currentScreen !is Screen.Home) {
+                    BackHandler {
+                        viewModel.navigateTo(Screen.Home)
+                    }
+                }
+
+                Scaffold(
+                    bottomBar = {
+                        if (currentScreen !is Screen.Driving) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .windowInsetsPadding(WindowInsets.navigationBars)
                             ) {
-                                MiniPlayer(
+                                // Floating Mini Player (visible if track is active)
+                                AnimatedVisibility(
+                                    visible = currentTrack != null,
+                                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                                ) {
+                                    MiniPlayer(
+                                        currentTrack = currentTrack,
+                                        isPlaying = isPlaying,
+                                        isBuffering = isBuffering,
+                                        currentPositionMs = currentPositionMs,
+                                        durationMs = durationMs,
+                                        onPlayPauseToggle = { viewModel.togglePlayPause() },
+                                        onSkipNext = { viewModel.skipNext() },
+                                        onStopAndDismiss = { viewModel.stopAndClearPlayback() },
+                                        onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
+                                        onExpandClick = { viewModel.setFullPlayerExpanded(true) },
+                                        isRetrying = isRetrying,
+                                        retryCount = retryCount,
+                                        playbackError = playbackError,
+                                        onManualRetry = { viewModel.retryPlaybackManually() }
+                                    )
+                                }
+
+                                // Bottom Navigation Bar
+                                val navItems = listOf(
+                                    NavItem(
+                                        Screen.Home,
+                                        tr(appLanguage, "خانه", "Home"),
+                                        Icons.Filled.Home,
+                                        Icons.Outlined.Home,
+                                        "nav_home"
+                                    ),
+                                    NavItem(
+                                        Screen.Search,
+                                        tr(appLanguage, "جستجو", "Search"),
+                                        Icons.Filled.Search,
+                                        Icons.Outlined.Search,
+                                        "nav_search"
+                                    ),
+                                    NavItem(
+                                        Screen.Library,
+                                        tr(appLanguage, "کتابخانه", "My Music"),
+                                        Icons.Filled.LibraryMusic,
+                                        Icons.Outlined.LibraryMusic,
+                                        "nav_library"
+                                    ),
+                                    NavItem(
+                                        Screen.Settings,
+                                        tr(appLanguage, "تنظیمات", "Settings"),
+                                        Icons.Filled.Settings,
+                                        Icons.Outlined.Settings,
+                                        "nav_settings"
+                                    )
+                                )
+
+                                GlassyBottomNavBar(
+                                    navItems = navItems,
+                                    currentScreen = currentScreen,
+                                    onSelectScreen = { screen -> viewModel.navigateTo(screen) }
+                                )
+                            }
+                        }
+                    },
+                    containerColor = OledBackground
+                ) { _ ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(OledBackground)
+                    ) {
+                        when (val screen = currentScreen) {
+                            is Screen.Home -> {
+                                HomeScreen(
+                                    selectedCountry = selectedCountry,
+                                    trendingTracks = trendingTracks,
+                                    newReleaseTracks = newReleaseTracks,
+                                    isLoadingTrending = isLoadingTrending,
+                                    recentHistory = recentHistory,
+                                    activeMood = activeMood,
+                                    moodTracks = moodTracks,
+                                    isLoadingMood = isLoadingMood,
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying,
-                                    isBuffering = isBuffering,
-                                    currentPositionMs = currentPositionMs,
-                                    durationMs = durationMs,
-                                    onPlayPauseToggle = { viewModel.togglePlayPause() },
-                                    onSkipNext = { viewModel.skipNext() },
-                                    onStopAndDismiss = { viewModel.stopAndClearPlayback() },
+                                    onCountryClick = { viewModel.setCountryPickerVisible(true) },
+                                    onSearchClick = { viewModel.navigateTo(Screen.Search) },
+                                    onDriveClick = { viewModel.navigateTo(Screen.Driving) },
+                                    onProfileClick = { viewModel.navigateTo(Screen.Profile) },
+                                    onMoodClick = { mood ->
+                                        viewModel.selectMood(if (activeMood?.id == mood.id) null else mood)
+                                    },
+                                    onTrackClick = { track, list -> viewModel.playTrack(track, list) },
                                     onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
-                                    onExpandClick = { viewModel.setFullPlayerExpanded(true) },
-                                    isRetrying = isRetrying,
-                                    retryCount = retryCount,
-                                    playbackError = playbackError,
-                                    onManualRetry = { viewModel.retryPlaybackManually() }
+                                    onStopTrackClick = { viewModel.stopAndClearPlayback() },
+                                    onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
+                                    onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
+                                    trendingErrorMessage = trendingErrorMessage,
+                                    onRetryTrending = { viewModel.loadTrendingForCountry(selectedCountry) }
                                 )
                             }
 
-                            // Bottom Navigation Bar
-                            val navItems = listOf(
-                                NavItem(
-                                    Screen.Home,
-                                    tr(appLanguage, "خانه", "Home"),
-                                    Icons.Filled.Home,
-                                    Icons.Outlined.Home,
-                                    "nav_home"
-                                ),
-                                NavItem(
-                                    Screen.Search,
-                                    tr(appLanguage, "جستجو", "Search"),
-                                    Icons.Filled.Search,
-                                    Icons.Outlined.Search,
-                                    "nav_search"
-                                ),
-                                NavItem(
-                                    Screen.Library,
-                                    tr(appLanguage, "کتابخانه", "My Music"),
-                                    Icons.Filled.LibraryMusic,
-                                    Icons.Outlined.LibraryMusic,
-                                    "nav_library"
-                                ),
-                                NavItem(
-                                    Screen.Settings,
-                                    tr(appLanguage, "تنظیمات", "Settings"),
-                                    Icons.Filled.Settings,
-                                    Icons.Outlined.Settings,
-                                    "nav_settings"
+                            is Screen.Search -> {
+                                SearchScreen(
+                                    searchQuery = searchQuery,
+                                    searchResults = searchResults,
+                                    isSearching = isSearching,
+                                    selectedCountry = selectedCountry,
+                                    genreFilter = searchGenreFilter,
+                                    yearFilter = searchYearFilter,
+                                    countryFilter = searchCountryFilter,
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying,
+                                    onQueryChanged = { viewModel.onSearchQueryChanged(it) },
+                                    onGenreFilterChanged = { viewModel.setGenreFilter(it) },
+                                    onYearFilterChanged = { viewModel.setYearFilter(it) },
+                                    onCountryFilterChanged = { viewModel.setSearchCountryFilter(it) },
+                                    onMoodSelectFromSearch = { mood ->
+                                        viewModel.selectMood(mood)
+                                        viewModel.navigateTo(Screen.Home)
+                                    },
+                                    onTrackClick = { track, list -> viewModel.playTrack(track, list) },
+                                    onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
+                                    onStopTrackClick = { viewModel.stopAndClearPlayback() },
+                                    onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
+                                    onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
+                                    onSubmitSearch = { viewModel.submitSearchNow() },
+                                    onClearAllFilters = { viewModel.clearAllSearchFilters() }
                                 )
-                            )
+                            }
 
-                            NavigationBar(
-                                containerColor = OledBackground,
-                                contentColor = TextPrimary,
-                                tonalElevation = 8.dp
-                            ) {
-                                navItems.forEach { item ->
-                                    val isSelected = currentScreen::class == item.screen::class
+                            is Screen.Library -> {
+                                LibraryScreen(
+                                    favorites = favorites,
+                                    playlists = playlists,
+                                    listeningHistory = recentHistory,
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying,
+                                    onTrackClick = { track, list -> viewModel.playTrack(track, list) },
+                                    onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
+                                    onStopTrackClick = { viewModel.stopAndClearPlayback() },
+                                    onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
+                                    onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
+                                    onCreatePlaylistClick = { viewModel.setCreatePlaylistVisible(true) },
+                                    onOpenPlaylist = { playlist -> viewModel.openPlaylist(playlist) },
+                                    onClearHistory = { viewModel.clearHistory() }
+                                )
+                            }
 
-                                    NavigationBarItem(
-                                        selected = isSelected,
-                                        onClick = { viewModel.navigateTo(item.screen) },
-                                        icon = {
-                                            Icon(
-                                                imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                                                contentDescription = item.title
-                                            )
-                                        },
-                                        label = {
-                                            Text(text = item.title)
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = Color.Black,
-                                            selectedTextColor = AccentGold,
-                                            indicatorColor = AccentGold,
-                                            unselectedIconColor = TextSecondary,
-                                            unselectedTextColor = TextSecondary
-                                        ),
-                                        modifier = Modifier.testTag(item.tag)
+                            is Screen.PlaylistDetail -> {
+                                selectedPlaylist?.let { pl ->
+                                    PlaylistDetailScreen(
+                                        playlist = pl,
+                                        tracks = selectedPlaylistTracks,
+                                        currentTrack = currentTrack,
+                                        isPlaying = isPlaying,
+                                        onBack = { viewModel.navigateTo(Screen.Library) },
+                                        onTrackClick = { track, list -> viewModel.playTrack(track, list) },
+                                        onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
+                                        onRemoveTrack = { trackId -> viewModel.removeTrackFromPlaylist(pl.id, trackId) },
+                                        onDeletePlaylist = { viewModel.deletePlaylist(pl) }
                                     )
                                 }
                             }
-                        }
-                    }
-                },
-                containerColor = OledBackground
-            ) { _ ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(OledBackground)
-                ) {
-                    when (val screen = currentScreen) {
-                        is Screen.Home -> {
-                            HomeScreen(
-                                selectedCountry = selectedCountry,
-                                trendingTracks = trendingTracks,
-                                newReleaseTracks = newReleaseTracks,
-                                isLoadingTrending = isLoadingTrending,
-                                recentHistory = recentHistory,
-                                activeMood = activeMood,
-                                moodTracks = moodTracks,
-                                isLoadingMood = isLoadingMood,
-                                currentTrack = currentTrack,
-                                isPlaying = isPlaying,
-                                onCountryClick = { viewModel.setCountryPickerVisible(true) },
-                                onSearchClick = { viewModel.navigateTo(Screen.Search) },
-                                onDriveClick = { viewModel.navigateTo(Screen.Driving) },
-                                onMoodClick = { mood -> viewModel.selectMood(if (activeMood?.id == mood.id) null else mood) },
-                                onTrackClick = { track, list -> viewModel.playTrack(track, list) },
-                                onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
-                                onStopTrackClick = { viewModel.stopAndClearPlayback() },
-                                onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
-                                trendingErrorMessage = trendingErrorMessage,
-                                onRetryTrending = { viewModel.loadTrendingForCountry(selectedCountry) }
-                            )
-                        }
 
-                        is Screen.Search -> {
-                            SearchScreen(
-                                searchQuery = searchQuery,
-                                searchResults = searchResults,
-                                isSearching = isSearching,
-                                selectedCountry = selectedCountry,
-                                genreFilter = searchGenreFilter,
-                                yearFilter = searchYearFilter,
-                                countryFilter = searchCountryFilter,
-                                currentTrack = currentTrack,
-                                isPlaying = isPlaying,
-                                onQueryChanged = { viewModel.onSearchQueryChanged(it) },
-                                onGenreFilterChanged = { viewModel.setGenreFilter(it) },
-                                onYearFilterChanged = { viewModel.setYearFilter(it) },
-                                onCountryFilterChanged = { viewModel.setSearchCountryFilter(it) },
-                                onMoodSelectFromSearch = { mood ->
-                                    viewModel.selectMood(mood)
-                                    viewModel.navigateTo(Screen.Home)
-                                },
-                                onTrackClick = { track, list -> viewModel.playTrack(track, list) },
-                                onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
-                                onStopTrackClick = { viewModel.stopAndClearPlayback() },
-                                onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
-                                onSubmitSearch = { viewModel.submitSearchNow() },
-                                onClearAllFilters = { viewModel.clearAllSearchFilters() }
-                            )
-                        }
-
-                        is Screen.Library -> {
-                            LibraryScreen(
-                                favorites = favorites,
-                                playlists = playlists,
-                                listeningHistory = recentHistory,
-                                currentTrack = currentTrack,
-                                isPlaying = isPlaying,
-                                onTrackClick = { track, list -> viewModel.playTrack(track, list) },
-                                onArtistClick = { artist -> viewModel.openArtistDetail(artist) },
-                                onStopTrackClick = { viewModel.stopAndClearPlayback() },
-                                onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
-                                onCreatePlaylistClick = { viewModel.setCreatePlaylistVisible(true) },
-                                onOpenPlaylist = { playlist -> viewModel.openPlaylist(playlist) },
-                                onClearHistory = { viewModel.clearHistory() }
-                            )
-                        }
-
-                        is Screen.PlaylistDetail -> {
-                            selectedPlaylist?.let { pl ->
-                                PlaylistDetailScreen(
-                                    playlist = pl,
-                                    tracks = selectedPlaylistTracks,
+                            is Screen.ArtistDetail -> {
+                                ArtistDetailScreen(
+                                    artistName = screen.artistName,
+                                    tracks = artistTracks,
+                                    sortOption = artistSortOption,
+                                    isLoading = isLoadingArtist,
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying,
-                                    onBack = { viewModel.navigateTo(Screen.Library) },
-                                    onTrackClick = { track, list -> viewModel.playTrack(track, list) },
+                                    onBack = { viewModel.navigateTo(Screen.Home) },
+                                    onSortChanged = { sort -> viewModel.setArtistSortOption(sort) },
+                                    onPlayTrackInArtistQueue = { track, list, mode ->
+                                        mode?.let { viewModel.setPlaybackMode(it) }
+                                        viewModel.playTrack(track, list)
+                                    },
                                     onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                    onRemoveTrack = { trackId -> viewModel.removeTrackFromPlaylist(pl.id, trackId) },
-                                    onDeletePlaylist = { viewModel.deletePlaylist(pl) }
+                                    onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
+                                    onStopTrackClick = { viewModel.stopAndClearPlayback() }
                                 )
                             }
-                        }
 
-                        is Screen.ArtistDetail -> {
-                            ArtistDetailScreen(
-                                artistName = screen.artistName,
-                                tracks = artistTracks,
-                                sortOption = artistSortOption,
-                                isLoading = isLoadingArtist,
-                                currentTrack = currentTrack,
-                                isPlaying = isPlaying,
-                                onBack = { viewModel.navigateTo(Screen.Home) },
-                                onSortChanged = { sort -> viewModel.setArtistSortOption(sort) },
-                                onPlayTrackInArtistQueue = { track, list, mode ->
-                                    mode?.let { viewModel.setPlaybackMode(it) }
-                                    viewModel.playTrack(track, list)
-                                },
-                                onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                onAddToPlaylistClick = { track -> viewModel.openAddToPlaylist(track) },
-                                onStopTrackClick = { viewModel.stopAndClearPlayback() }
-                            )
-                        }
+                            is Screen.Driving -> {
+                                DrivingModeScreen(
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying,
+                                    isBuffering = isBuffering,
+                                    onBack = { viewModel.navigateTo(Screen.Home) },
+                                    onPlayPauseToggle = { viewModel.togglePlayPause() },
+                                    onSkipNext = { viewModel.skipNext() },
+                                    onSkipPrevious = { viewModel.skipPrevious() },
+                                    onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
+                                    onSelectDriveMood = { query ->
+                                        viewModel.onSearchQueryChanged(query)
+                                        viewModel.navigateTo(Screen.Search)
+                                    }
+                                )
+                            }
 
-                        is Screen.Driving -> {
-                            DrivingModeScreen(
-                                currentTrack = currentTrack,
-                                isPlaying = isPlaying,
-                                isBuffering = isBuffering,
-                                onBack = { viewModel.navigateTo(Screen.Home) },
-                                onPlayPauseToggle = { viewModel.togglePlayPause() },
-                                onSkipNext = { viewModel.skipNext() },
-                                onSkipPrevious = { viewModel.skipPrevious() },
-                                onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                                onSelectDriveMood = { query ->
-                                    viewModel.onSearchQueryChanged(query)
-                                    viewModel.navigateTo(Screen.Search)
-                                }
-                            )
-                        }
+                            is Screen.Profile -> {
+                                ProfileScreen(
+                                    userProfile = activeProfile,
+                                    googleDriveWebhookUrl = googleDriveWebhookUrl,
+                                    otpMode = otpMode,
+                                    isSyncing = isSyncingDrive,
+                                    syncStatusMessage = driveSyncStatusMessage,
+                                    onBack = { viewModel.navigateTo(Screen.Home) },
+                                    onSaveProfile = { displayName, bio, genres ->
+                                        viewModel.saveUserProfileDetails(displayName, bio, genres)
+                                    },
+                                    onChangePhoneClick = {
+                                        viewModel.navigateTo(Screen.PhoneVerification)
+                                    },
+                                    onChangeCountryClick = {
+                                        viewModel.setCountryPickerVisible(true)
+                                    },
+                                    onSaveWebhookUrl = { url ->
+                                        viewModel.setGoogleDriveWebhookUrl(url)
+                                    },
+                                    onChangeOtpMode = { mode ->
+                                        viewModel.setOtpMode(mode)
+                                    },
+                                    onSignOut = {
+                                        viewModel.signOut()
+                                    }
+                                )
+                            }
 
-                        is Screen.Settings -> {
-                            SettingsScreen(
-                                selectedCountry = selectedCountry,
-                                audioQuality = audioQuality,
-                                appLanguage = appLanguage,
-                                onCountryChangeClick = { viewModel.setCountryPickerVisible(true) },
-                                onAudioQualityChanged = { quality -> viewModel.setAudioQuality(quality) },
-                                onLanguageChanged = { lang -> viewModel.setAppLanguage(lang) },
-                                iranNoVpnMode = iranNoVpnMode,
-                                onIranNoVpnModeChanged = { enabled -> viewModel.setIranNoVpnMode(enabled) },
-                                onClearCacheClick = { viewModel.clearTemporaryCache() },
-                                authState = authState,
-                                onSignInClick = { viewModel.navigateTo(Screen.Login) },
-                                onSignOutClick = { viewModel.signOut() },
-                                onDeleteAccountClick = { viewModel.deleteAccount() }
-                            )
-                        }
+                            is Screen.Settings -> {
+                                SettingsScreen(
+                                    selectedCountry = selectedCountry,
+                                    audioQuality = audioQuality,
+                                    appLanguage = appLanguage,
+                                    onCountryChangeClick = { viewModel.setCountryPickerVisible(true) },
+                                    onAudioQualityChanged = { quality -> viewModel.setAudioQuality(quality) },
+                                    onLanguageChanged = { lang -> viewModel.setAppLanguage(lang) },
+                                    iranNoVpnMode = iranNoVpnMode,
+                                    onIranNoVpnModeChanged = { enabled -> viewModel.setIranNoVpnMode(enabled) },
+                                    onClearCacheClick = { viewModel.clearTemporaryCache() },
+                                    authState = authState,
+                                    userProfile = activeProfile,
+                                    isTrialActive = hasValidTrialAccess,
+                                    trialRemainingMs = trialRemainingMs,
+                                    onOpenProfileClick = { viewModel.navigateTo(Screen.Profile) },
+                                    onSignInClick = { viewModel.navigateTo(Screen.Login) },
+                                    onSignOutClick = { viewModel.signOut() },
+                                    onDeleteAccountClick = { viewModel.deleteAccount() }
+                                )
+                            }
 
-                        else -> {}
+                            else -> {}
+                        }
                     }
                 }
             }

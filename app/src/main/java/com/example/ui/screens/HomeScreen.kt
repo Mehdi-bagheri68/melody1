@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -84,7 +85,8 @@ fun HomeScreen(
     onToggleFavorite: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit,
     trendingErrorMessage: String? = null,
-    onRetryTrending: () -> Unit = {}
+    onRetryTrending: () -> Unit = {},
+    onProfileClick: () -> Unit = {}
 ) {
     val lang = LocalAppLanguage.current
     val greeting = rememberGreeting(lang)
@@ -96,7 +98,7 @@ fun HomeScreen(
             .statusBarsPadding(),
         contentPadding = PaddingValues(bottom = 130.dp)
     ) {
-        // Top App Bar / Greeting + Country Switcher + Car Mode Icon
+        // Top App Bar / Greeting + Country Switcher + Car Mode + Profile Icon
         item(key = "home_header") {
             Row(
                 modifier = Modifier
@@ -160,14 +162,14 @@ fun HomeScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     // Car Mode Shortcut (Top-Bar next to Country Selector)
                     IconButton(
                         onClick = onDriveClick,
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
-                            .size(48.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
                             .background(OledSurfaceVariant)
                             .testTag("car_mode_shortcut")
@@ -175,6 +177,27 @@ fun HomeScreen(
                         Icon(
                             imageVector = Icons.Default.DirectionsCar,
                             contentDescription = tr(lang, "حالت رانندگی", "Driving Mode"),
+                            tint = AccentGold,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // User Profile Shortcut
+                    IconButton(
+                        onClick = onProfileClick,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(OledSurfaceVariant)
+                            .border(1.dp, BorderHighlight, CircleShape)
+                            .testTag("home_profile_shortcut")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = tr(lang, "پروفایل کاربری", "User Profile"),
                             tint = AccentGold,
                             modifier = Modifier.size(20.dp)
                         )

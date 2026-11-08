@@ -11,10 +11,12 @@ import com.example.data.model.AudioQuality
 import com.example.data.model.CountriesData
 import com.example.data.model.Country
 import com.example.data.model.MoodCategory
+import com.example.data.model.OtpMode
 import com.example.data.model.PlaybackError
 import com.example.data.model.PlaybackMode
 import com.example.data.model.Playlist
 import com.example.data.model.Track
+import com.example.data.model.UserProfile
 import com.example.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -29,6 +31,8 @@ import kotlinx.coroutines.launch
 sealed class Screen(val route: String) {
     object Onboarding : Screen("onboarding")
     object Login : Screen("login")
+    object PhoneVerification : Screen("phone_verification")
+    object Profile : Screen("profile")
     object Register : Screen("register")
     object ForgotPassword : Screen("forgot_password")
     object VerifyEmail : Screen("verify_email")
@@ -47,10 +51,44 @@ class MainViewModel : ViewModel() {
     private val repository = app.repository
     private val userPreferences = app.userPreferences
     private val authRepository = app.authRepository
+    private val driveStorageService = app.driveStorageService
     private val playerController = app.playerController
 
     val appLanguage: StateFlow<AppLanguage> = userPreferences.appLanguage
     val authState: StateFlow<AuthState> = authRepository.state
+
+    // Centralized User Profile & Google Drive Sync State (v1.8.0)
+    val userProfile: StateFlow<UserProfile?> = userPreferences.userProfile
+    val otpMode: StateFlow<OtpMode> = userPreferences.otpMode
+    val googleDriveWebhookUrl: StateFlow<String> = userPreferences.googleDriveWebhookUrl
+    val onboardingCompleted: StateFlow<Boolean> = userPreferences.onboardingCompleted
+
+    // 3-Day Free Trial State (v1.9.0)
+    val trialStartedAtMs: StateFlow<Long> = userPreferences.trialStartedAtMs
+    val isTrialSessionActive: StateFlow<Boolean> = userPreferences.isTrialSessionActive
+
+    private val _trialRemainingMs = MutableStateFlow(
+        com.example.data.model.AppConfig.computeTrialRemainingMs(userPreferences.trialStartedAtMs.value)
+    )
+    val trialRemainingMs: StateFlow<Long> = _trialRemainingMs.asStateFlow()
+
+    private val _isTrialExpired = MutableStateFlow(
+        userPreferences.trialStartedAtMs.value > 0L &&
+            !com.example.data.model.AppConfig.isTrialValid(userPreferences.trialStartedAtMs.value)
+    )
+    val isTrialExpired: StateFlow<Boolean> = _isTrialExpired.asStateFlow()
+
+    private val _isSyncingDrive = MutableStateFlow(false)
+    val isSyncingDrive: StateFlow<Boolean> = _isSyncingDrive.asStateFlow()
+
+    private val _generatedFallbackOtp = MutableStateFlow<String?>(null)
+    val generatedFallbackOtp: StateFlow<String?> = _generatedFallbackOtp.asStateFlow()
+
+    private val _otpStatusBanner = MutableStateFlow<String?>(null)
+    val otpStatusBanner: StateFlow<String?> = _otpStatusBanner.asStateFlow()
+
+    private val _driveSyncStatusMessage = MutableStateFlow<String?>(null)
+    val driveSyncStatusMessage: StateFlow<String?> = _driveSyncStatusMessage.asStateFlow()
 
     private val _isAuthLoading = MutableStateFlow(false)
     val isAuthLoading: StateFlow<Boolean> = _isAuthLoading.asStateFlow()
@@ -62,11 +100,19 @@ class MainViewModel : ViewModel() {
     val authInfoMessage: StateFlow<String?> = _authInfoMessage.asStateFlow()
 
     private val _currentScreen = MutableStateFlow<Screen>(
-        if (userPreferences.onboardingCompleted.value) Screen.Home else Screen.Onboarding
+        resolveInitialScreen(
+            profile = userPreferences.userProfile.value,
+            onboardingDone = userPreferences.onboardingCompleted.value,
+            trialSessionActive = userPreferences.isTrialSessionActive.value,
+            trialStartMs = userPreferences.trialStartedAtMs.value
+        )
     )
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
 
-    private val initialCountry = CountriesData.getCountryByCode(userPreferences.selectedCountryCode.value)
+    private val initialCountry = CountriesData.getCountryByCode(
+        userPreferences.userProfile.value?.selectedCountry?.takeIf { it.isNotBlank() }
+            ?: userPreferences.selectedCountryCode.value
+    )
 
     private val _selectedCountry = MutableStateFlow(initialCountry)
     val selectedCountry: StateFlow<Country> = _selectedCountry.asStateFlow()
@@ -187,14 +233,284 @@ class MainViewModel : ViewModel() {
 
     init {
         loadTrendingForCountry(_selectedCountry.value)
+        startTrialExpirationMonitor()
+    }
+
+    private fun resolveInitialScreen(
+        profile: UserProfile?,
+        onboardingDone: Boolean,
+        trialSessionActive: Boolean,
+        trialStartMs: Long
+    ): Screen {
+        val trialValid = trialSessionActive && com.example.data.model.AppConfig.isTrialValid(trialStartMs)
+        if (trialValid) {
+            return if (onboardingDone) Screen.Home else Screen.Onboarding
+        }
+        return when {
+            profile == null || !profile.isAuthenticated -> Screen.Login
+            !profile.isPhoneVerifiedStrict -> Screen.PhoneVerification
+            !profile.isCountrySelectedStrict || !onboardingDone -> Screen.Onboarding
+            else -> Screen.Home
+        }
+    }
+
+    private fun startTrialExpirationMonitor() {
+        viewModelScope.launch {
+            while (true) {
+                val startMs = userPreferences.trialStartedAtMs.value
+                val rem = com.example.data.model.AppConfig.computeTrialRemainingMs(startMs)
+                _trialRemainingMs.value = rem
+                val expired = startMs > 0L && rem <= 0L
+                _isTrialExpired.value = expired
+
+                if (expired && userPreferences.isTrialSessionActive.value) {
+                    userPreferences.endTrialSession()
+                    val profile = userPreferences.userProfile.value
+                    if (profile == null || !profile.isAuthenticated) {
+                        stopAndClearPlayback()
+                        _authErrorMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                            "مهلت استفاده آزمایشی ۳ روزه شما به پایان رسید. لطفاً برای ادامه کار با اپلیکیشن با حساب گوگل یا جیمیل خود وارد شوید."
+                        } else {
+                            "Your 3-day free trial has expired. Please sign in with your Google/Gmail account to continue."
+                        }
+                        _currentScreen.value = Screen.Login
+                    }
+                }
+                delay(30_000L)
+            }
+        }
+    }
+
+    /**
+     * Triggered when the user taps the Red 3-Day Free Trial button on the Login screen.
+     * Allows full access to the app for 3 days (72 hours) without entering a Gmail/Google account or phone OTP.
+     */
+    fun startThreeDayTrial() {
+        val valid = userPreferences.startOrResumeTrial()
+        val startMs = userPreferences.trialStartedAtMs.value
+        _trialRemainingMs.value = com.example.data.model.AppConfig.computeTrialRemainingMs(startMs)
+        _isTrialExpired.value = !valid
+
+        if (valid) {
+            clearAuthMessages()
+            _currentScreen.value = if (userPreferences.onboardingCompleted.value) {
+                Screen.Home
+            } else {
+                Screen.Onboarding
+            }
+        } else {
+            _authErrorMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                "مهلت استفاده آزمایشی ۳ روزه به پایان رسیده است. لطفاً برای ادامه استفاده از اپلیکیشن با اکانت جیمیل یا گوگل خود وارد شوید."
+            } else {
+                "Your 3-day free trial has ended. Please sign in with your Google/Gmail account to continue."
+            }
+        }
     }
 
     private fun currentUserId(): String =
-        (authState.value as? AuthState.SignedIn)?.uid ?: "local"
+        userProfile.value?.uid?.takeIf { it.isNotBlank() }
+            ?: (authState.value as? AuthState.SignedIn)?.uid
+            ?: "local"
 
     fun clearAuthMessages() {
         _authErrorMessage.value = null
         _authInfoMessage.value = null
+    }
+
+    fun setAuthErrorMessage(msg: String?) {
+        _authErrorMessage.value = msg
+    }
+
+    /**
+     * Step 1 & Step 2 of Strict Onboarding Guard:
+     * Called immediately after Google Sign-In succeeds.
+     * Queries Admin Google Drive (`syncUserFromDrive`) + local cache, loads existing phone/country if present,
+     * and routes strictly to Step 3 (`PhoneVerification`), Step 4 (`Onboarding`), or Step 5 (`Home`).
+     */
+    fun onGoogleSignedIn(
+        uid: String,
+        email: String,
+        displayName: String,
+        photoUrl: String
+    ) {
+        viewModelScope.launch {
+            _isSyncingDrive.value = true
+            _authErrorMessage.value = null
+            try {
+                val syncOutcome = driveStorageService.syncUserFromDrive(
+                    uid = uid,
+                    email = email,
+                    initialDisplayName = displayName,
+                    initialPhotoUrl = photoUrl
+                )
+                val syncedProfile = syncOutcome.profile
+                _driveSyncStatusMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                    syncOutcome.statusMessageFa
+                } else {
+                    syncOutcome.statusMessageEn
+                }
+
+                // If the user already had a selected country in Admin Google Drive, restore it immediately
+                if (syncedProfile.selectedCountry.isNotBlank()) {
+                    val restoredCountry = CountriesData.getCountryByCode(syncedProfile.selectedCountry)
+                    userPreferences.setSelectedCountryCode(restoredCountry.code)
+                    userPreferences.setOnboardingCompleted(true)
+                    _selectedCountry.value = restoredCountry
+                    _moodCategories.value = CountriesData.getMoodCategoriesForCountry(restoredCountry)
+                    _trendingTracks.value = repository.getInitialTrendingSync(restoredCountry)
+                    _newReleaseTracks.value = repository.getInitialNewReleasesSync(restoredCountry)
+                    loadTrendingForCountry(restoredCountry)
+                }
+
+                // Strict Onboarding Guard routing
+                _currentScreen.value = when {
+                    !syncedProfile.isPhoneVerifiedStrict -> Screen.PhoneVerification
+                    !syncedProfile.isCountrySelectedStrict -> Screen.Onboarding
+                    else -> Screen.Home
+                }
+            } catch (e: Exception) {
+                AppLogger.w("onGoogleSignedIn", "Error syncing user profile from Drive", e)
+                _authErrorMessage.value = e.localizedMessage
+            } finally {
+                _isSyncingDrive.value = false
+            }
+        }
+    }
+
+    fun setOtpMode(mode: OtpMode) {
+        userPreferences.setOtpMode(mode)
+    }
+
+    fun setGoogleDriveWebhookUrl(url: String) {
+        userPreferences.setGoogleDriveWebhookUrl(url)
+        viewModelScope.launch {
+            val current = userProfile.value ?: return@launch
+            _isSyncingDrive.value = true
+            try {
+                val outcome = driveStorageService.saveOrUpdateUserProfile(current)
+                _driveSyncStatusMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                    outcome.statusMessageFa
+                } else {
+                    outcome.statusMessageEn
+                }
+            } finally {
+                _isSyncingDrive.value = false
+            }
+        }
+    }
+
+    /**
+     * Step 3 (Part A): Request a 6-digit OTP for the user's mobile phone number.
+     */
+    fun requestPhoneOtp(dialCode: String, rawPhone: String) {
+        viewModelScope.launch {
+            _isSyncingDrive.value = true
+            _authErrorMessage.value = null
+            try {
+                val email = userProfile.value?.email.orEmpty()
+                val result = driveStorageService.requestOtp(
+                    dialCode = dialCode,
+                    rawPhoneInput = rawPhone,
+                    email = email,
+                    mode = otpMode.value
+                )
+                if (result.success) {
+                    _generatedFallbackOtp.value = result.generatedCodeForFallbackOrTest
+                    _otpStatusBanner.value = if (appLanguage.value == AppLanguage.FA) {
+                        result.messageFa
+                    } else {
+                        result.messageEn
+                    }
+                } else {
+                    _authErrorMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                        result.messageFa
+                    } else {
+                        result.messageEn
+                    }
+                }
+            } finally {
+                _isSyncingDrive.value = false
+            }
+        }
+    }
+
+    /**
+     * Step 3 (Part B): Verify the 6-digit OTP code, save `phoneNumber` & `phoneVerified = true`
+     * to Admin Google Drive + local cache, and route to Country Selection (or Home if already selected).
+     */
+    fun verifyPhoneOtp(normalizedPhone: String, enteredCode: String) {
+        viewModelScope.launch {
+            _isSyncingDrive.value = true
+            _authErrorMessage.value = null
+            try {
+                val verified = driveStorageService.verifyOtp(
+                    normalizedPhone = normalizedPhone,
+                    enteredCode = enteredCode,
+                    mode = otpMode.value
+                )
+                if (!verified) {
+                    _authErrorMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                        "کد تایید ۶ رقمی وارد شده صحیح نیست یا منقضی شده است."
+                    } else {
+                        "Invalid or expired 6-digit verification code."
+                    }
+                    return@launch
+                }
+
+                val current = userProfile.value ?: UserProfile()
+                val updated = current.copy(
+                    phoneNumber = normalizedPhone,
+                    phoneVerified = true
+                )
+                val outcome = driveStorageService.saveOrUpdateUserProfile(updated)
+                _generatedFallbackOtp.value = null
+                _otpStatusBanner.value = null
+                _driveSyncStatusMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                    outcome.statusMessageFa
+                } else {
+                    outcome.statusMessageEn
+                }
+
+                // Proceed to Step 4 (Country Selection) if country not yet chosen, else Main Player
+                if (!outcome.profile.isCountrySelectedStrict || !userPreferences.onboardingCompleted.value) {
+                    _currentScreen.value = Screen.Onboarding
+                } else {
+                    _currentScreen.value = Screen.Home
+                }
+            } finally {
+                _isSyncingDrive.value = false
+            }
+        }
+    }
+
+    /**
+     * Module 4: Save edited User Profile fields (`displayName`, `bio`, `favoriteGenres`)
+     * to both local cache (`localStorage`) and the Admin's Google Drive.
+     */
+    fun saveUserProfileDetails(
+        displayName: String,
+        bio: String,
+        favoriteGenres: List<String>
+    ) {
+        viewModelScope.launch {
+            val current = userProfile.value ?: return@launch
+            _isSyncingDrive.value = true
+            try {
+                val updated = current.copy(
+                    displayName = displayName.ifBlank { current.displayName },
+                    bio = bio,
+                    favoriteGenres = favoriteGenres.ifEmpty { listOf("Pop") }
+                )
+                val outcome = driveStorageService.saveOrUpdateUserProfile(updated)
+                _driveSyncStatusMessage.value = if (appLanguage.value == AppLanguage.FA) {
+                    outcome.statusMessageFa
+                } else {
+                    outcome.statusMessageEn
+                }
+            } finally {
+                _isSyncingDrive.value = false
+            }
+        }
     }
 
     fun loginWithEmail(email: String, password: String) {
@@ -290,6 +606,9 @@ class MainViewModel : ViewModel() {
             stopAndClearPlayback()
             repository.clearSearchCache()
             authRepository.signOut()
+            userPreferences.clearAuthSession()
+            _generatedFallbackOtp.value = null
+            _otpStatusBanner.value = null
             clearAuthMessages()
             _currentScreen.value = Screen.Login
         }
@@ -300,6 +619,9 @@ class MainViewModel : ViewModel() {
             stopAndClearPlayback()
             repository.clearSearchCache()
             authRepository.deleteAccount()
+            userPreferences.clearAuthSession()
+            _generatedFallbackOtp.value = null
+            _otpStatusBanner.value = null
             clearAuthMessages()
             _currentScreen.value = Screen.Login
         }
@@ -368,6 +690,10 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Step 4 of Strict Onboarding Guard:
+     * Saves the selected country in preferences AND updates the user's profile in Admin Google Drive + local cache.
+     */
     fun completeOnboarding(country: Country) {
         userPreferences.setSelectedCountryCode(country.code)
         userPreferences.setOnboardingCompleted(true)
@@ -379,6 +705,12 @@ class MainViewModel : ViewModel() {
         _moodTracks.value = emptyList()
         _currentScreen.value = Screen.Home
         loadTrendingForCountry(country)
+
+        viewModelScope.launch {
+            val current = userProfile.value ?: return@launch
+            val updated = current.copy(selectedCountry = country.code)
+            driveStorageService.saveOrUpdateUserProfile(updated)
+        }
     }
 
     fun selectCountry(country: Country) {
@@ -400,6 +732,13 @@ class MainViewModel : ViewModel() {
         }
 
         loadTrendingForCountry(country)
+
+        // Also update the user's selectedCountry in Admin Google Drive + local cache
+        viewModelScope.launch {
+            val current = userProfile.value ?: return@launch
+            val updated = current.copy(selectedCountry = country.code)
+            driveStorageService.saveOrUpdateUserProfile(updated)
+        }
     }
 
     fun loadTrendingForCountry(country: Country) {

@@ -175,7 +175,11 @@ fun OnboardingScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OnboardingStepsBanner(currentStep = 3, lang = lang)
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Question Header
                 Text(

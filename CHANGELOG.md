@@ -1,7 +1,24 @@
 # Changelog — MeloGroove Android Music Player
 
-All notable changes and audit bug fixes from `v1.0.0` to `v1.6.0` are documented here.
-See `VERSION_HISTORY.md`, `BUG_FIX_REPORT_v1.6.0.md`, and `BUG_FIX_REPORT_v1.5.0.md` for full Persian & English technical reports.
+All notable changes and audit bug fixes from `v1.0.0` to `v1.9.0` are documented here.
+See `VERSION_HISTORY.md`, `GOOGLE_DRIVE_SETUP_GUIDE.md`, `BUG_FIX_REPORT_v1.6.0.md`, and `BUG_FIX_REPORT_v1.5.0.md` for full Persian & English technical reports.
+
+## [1.9.0] - 2026-11-08 (Build 9)
+### Added
+- **Red 3-Day Free Trial Button (`start_trial_button` on `GoogleLoginScreen`):** Added an active Crimson Red 3-Day Free Trial button on the login screen allowing users who do not wish to sign in with their Gmail/email account to enter and use the full application for 3 days (72 hours) without entering an account or phone OTP.
+- **Persistent 72-Hour Trial Timer & Expiration Guard (`UserPreferences`, `AppConfig`, `MainViewModel`):** Persists the initial trial start timestamp (`trialStartedAtMs`), displays live remaining days/hours on both the Login screen and Settings screen, and automatically prompts for Google Sign-In once the 3-day period expires.
+
+## [1.8.0] - 2026-11-08 (Build 8)
+### Added
+- **Strict Onboarding Guard (5 Mandatory Stages):** Enforced strict sequential progression in `MainActivity` & `MainViewModel`: (1) Google Sign-In (`GoogleLoginScreen`) -> (2) Admin Google Drive Profile Sync (`syncUserFromDrive`) -> (3) Mandatory Mobile Phone OTP Verification (`PhoneVerificationScreen`) -> (4) Country Selection (`OnboardingScreen`) -> (5) Main Music Player & User Profile Management (`ProfileScreen`).
+- **Official Google Authentication (`GoogleLoginScreen`):** Integrated Jetpack `CredentialManager` (`GetSignInWithGoogleOption` & `GetGoogleIdOption`) + Firebase Google Auth extracting `uid`, `email`, `displayName`, and `photoURL`, with a built-in Direct Gmail Fallback form for emulators/devices without Play Services.
+- **Mandatory Mobile OTP Verification (`PhoneVerificationScreen`):** Added configurable `OTP_MODE` (`SMART_FALLBACK`, `EMAIL_OR_GAS_OTP`, `FIREBASE_FREE`), dial-code selector defaulting to Iran (`+98`), strict Iran (`^(\+98|0)?9\d{9}$`) & international mobile regex validation, 6 auto-focus OTP digit boxes, 60-second resend countdown timer, and Smart Fallback code helper banner.
+- **Centralized Admin Google Drive Storage (`DriveStorageService` & `google-apps-script/Code.gs`):** Implemented `DriveStorageService` to store/sync each user's JSON record (`user_<uid>.json`) and master Google Sheet row in the Project Owner's Google Drive via `GOOGLE_DRIVE_WEBHOOK_URL` alongside instant local caching in `UserPreferences`.
+- **User Profile Management (`ProfileScreen`):** Added full profile editor (`displayName`, `bio`, multi-select `favoriteGenres`, `selectedCountry`, verified phone badge, immutable Gmail badge, Google Drive Webhook URL configuration, and 1-tap Apps Script copy).
+
+## [1.7.0] - 2026-11-07 (Build 7)
+### Changed
+- **Glassy Bottom Navigation Bar (V5 Row 3 Style):** Implemented `GlassyBottomNavBar` featuring a floating frosted-glass capsule with a dynamic cubic-bezier concave top cradle and an elevated glowing circular orb that smoothly animates to whichever tab is selected (supporting both RTL Persian and LTR English layouts).
 
 ## [1.6.0] - 2026-11-02 (Build 6)
 ### Added & Fixed (Architecture Roadmap & Audit N-01 to N-16, U-01 to U-12, Sections 5-8)

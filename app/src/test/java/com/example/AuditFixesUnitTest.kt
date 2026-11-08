@@ -261,4 +261,103 @@ class AuditFixesUnitTest {
         val signInNew = authRepo.signIn("user@example.com", "NewSecretPass88")
         assertTrue(signInNew is AuthResult.Success)
     }
+
+    @Test
+    fun `v1_8_0 AppConfig validates and normalizes Iran and international mobile numbers`() {
+        // Valid Iran numbers (+98)
+        assertTrue(com.example.data.model.AppConfig.isValidPhoneNumber("+98", "09123456789"))
+        assertTrue(com.example.data.model.AppConfig.isValidPhoneNumber("+98", "9123456789"))
+        assertTrue(com.example.data.model.AppConfig.isValidPhoneNumber("+98", "۰۹۱۲۳۴۵۶۷۸۹"))
+        assertEquals(
+            "+989123456789",
+            com.example.data.model.AppConfig.normalizePhoneNumber("+98", "09123456789")
+        )
+        assertEquals(
+            "+989123456789",
+            com.example.data.model.AppConfig.normalizePhoneNumber("+98", "۰۹۱۲۳۴۵۶۷۸۹")
+        )
+
+        // Invalid Iran numbers
+        assertFalse(com.example.data.model.AppConfig.isValidPhoneNumber("+98", "08123456789"))
+        assertFalse(com.example.data.model.AppConfig.isValidPhoneNumber("+98", "912345"))
+
+        // Valid International numbers
+        assertTrue(com.example.data.model.AppConfig.isValidPhoneNumber("+90", "5321234567"))
+        assertEquals(
+            "+905321234567",
+            com.example.data.model.AppConfig.normalizePhoneNumber("+90", "05321234567")
+        )
+    }
+
+    @Test
+    fun `v1_8_0 UserProfile JSON schema round-trip and Strict Onboarding Guard predicates`() {
+        val initialProfile = com.example.data.model.UserProfile(
+            uid = "google_12345",
+            email = "listener@gmail.com",
+            displayName = "Sara",
+            photoURL = "https://example.com/avatar.jpg",
+            phoneNumber = "",
+            phoneVerified = false,
+            selectedCountry = "",
+            favoriteGenres = listOf("Pop", "Traditional"),
+            bio = "Loves Persian classical music",
+            createdAt = "2026-11-08T00:00:00Z",
+            lastLoginAt = "2026-11-08T00:05:00Z",
+            deviceInfo = "Android 14"
+        )
+
+        // Step 1 passed (authenticated), Step 3 not yet passed (phone unverified), Step 4 not yet passed
+        assertTrue(initialProfile.isAuthenticated)
+        assertFalse(initialProfile.isPhoneVerifiedStrict)
+        assertFalse(initialProfile.isCountrySelectedStrict)
+
+        // After OTP verification & country selection
+        val completedProfile = initialProfile.copy(
+            phoneNumber = "+989123456789",
+            phoneVerified = true,
+            selectedCountry = "IR"
+        )
+        assertTrue(completedProfile.isPhoneVerifiedStrict)
+        assertTrue(completedProfile.isCountrySelectedStrict)
+
+        val jsonStr = completedProfile.toJsonString()
+        val parsed = com.example.data.model.UserProfile.fromJsonString(jsonStr)!!
+        assertEquals("google_12345", parsed.uid)
+        assertEquals("listener@gmail.com", parsed.email)
+        assertEquals("+989123456789", parsed.phoneNumber)
+        assertTrue(parsed.phoneVerified)
+        assertEquals("IR", parsed.selectedCountry)
+        assertEquals(listOf("Pop", "Traditional"), parsed.favoriteGenres)
+        assertEquals("Loves Persian classical music", parsed.bio)
+    }
+
+    @Test
+    fun `v1_9_0 Three-Day Free Trial duration, validity, and expiration check`() {
+        val startMs = 1_000_000_000L
+        // Immediately after starting trial -> full 3 days remaining & valid
+        assertEquals(
+            com.example.data.model.AppConfig.TRIAL_DURATION_MS,
+            com.example.data.model.AppConfig.computeTrialRemainingMs(startMs, startMs)
+        )
+        assertTrue(com.example.data.model.AppConfig.isTrialValid(startMs, startMs))
+
+        // After 2 days -> 1 day remaining & still valid
+        val twoDaysLater = startMs + 2L * 24L * 60L * 60L * 1000L
+        assertTrue(com.example.data.model.AppConfig.isTrialValid(startMs, twoDaysLater))
+        val remAfterTwoDays = com.example.data.model.AppConfig.computeTrialRemainingMs(startMs, twoDaysLater)
+        assertEquals(24L * 60L * 60L * 1000L, remAfterTwoDays)
+        assertTrue(
+            com.example.data.model.AppConfig.formatTrialRemaining(
+                remAfterTwoDays,
+                com.example.data.model.AppLanguage.FA
+            ).contains("1 روز")
+        )
+
+        // Exactly after 3 days (72 hours) -> expired (0 ms remaining)
+        val threeDaysLater = startMs + com.example.data.model.AppConfig.TRIAL_DURATION_MS
+        assertFalse(com.example.data.model.AppConfig.isTrialValid(startMs, threeDaysLater))
+        assertEquals(0L, com.example.data.model.AppConfig.computeTrialRemainingMs(startMs, threeDaysLater))
+    }
 }
+
+

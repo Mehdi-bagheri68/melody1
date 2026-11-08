@@ -65,6 +65,7 @@ import com.example.data.auth.AuthState
 import com.example.data.model.AppLanguage
 import com.example.data.model.AudioQuality
 import com.example.data.model.Country
+import com.example.data.model.UserProfile
 import com.example.ui.AppStrings.tr
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.AccentOrange
@@ -90,6 +91,10 @@ fun SettingsScreen(
     onIranNoVpnModeChanged: (Boolean) -> Unit = {},
     onClearCacheClick: () -> Unit = {},
     authState: AuthState = AuthState.SignedOut,
+    userProfile: UserProfile? = null,
+    isTrialActive: Boolean = false,
+    trialRemainingMs: Long = 0L,
+    onOpenProfileClick: () -> Unit = {},
     onSignInClick: () -> Unit = {},
     onSignOutClick: () -> Unit = {},
     onDeleteAccountClick: () -> Unit = {}
@@ -163,8 +168,8 @@ fun SettingsScreen(
                 Text(
                     text = tr(
                         appLanguage,
-                        "مدیریت حساب کاربری، زبان برنامه، کشور، کیفیت پخش و اتصال مستقیم",
-                        "Manage account, language, country, streaming quality & direct mode"
+                        "مدیریت پروفایل گوگل درایو، زبان برنامه، کشور، کیفیت پخش و اتصال مستقیم",
+                        "Manage Google Drive profile, language, country, streaming quality & direct mode"
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
@@ -172,11 +177,11 @@ fun SettingsScreen(
             }
         }
 
-        // Section 0: User Account Management (Email Auth)
+        // Section 0: User Profile & Google Drive Sync
         item {
             SettingsGroupTitle(
                 icon = Icons.Default.AccountCircle,
-                title = tr(appLanguage, "حساب کاربری (ایمیل)", "User Account (Email)")
+                title = tr(appLanguage, "پروفایل کاربری (گوگل + موبایل + درایو)", "User Profile (Google + OTP + Drive)")
             )
 
             Card(
@@ -193,134 +198,201 @@ fun SettingsScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    when (authState) {
-                        is AuthState.SignedIn -> {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
+                    val activeEmail = userProfile?.email?.takeIf { it.isNotBlank() }
+                        ?: (authState as? AuthState.SignedIn)?.email
+                    val activeName = userProfile?.displayName?.takeIf { it.isNotBlank() }
+                        ?: (authState as? AuthState.SignedIn)?.displayName.orEmpty()
+                    val activePhone = userProfile?.phoneNumber.orEmpty()
+
+                    if (!activeEmail.isNullOrBlank()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(AccentGold),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(AccentGold),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                Text(
+                                    text = activeName.take(2).uppercase().ifBlank { "MG" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = activeName.ifBlank { activeEmail },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = activeEmail,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = AccentGold
+                                )
+                                if (activePhone.isNotBlank()) {
                                     Text(
-                                        text = authState.displayName.take(2).uppercase().ifBlank { "MG" },
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = Color.Black,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = authState.displayName.ifBlank { authState.email },
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = TextPrimary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = authState.email,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = AccentGold
-                                    )
-                                }
-                                Surface(
-                                    color = Color(0x3300E676),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        text = tr(appLanguage, "فعال", "Active"),
+                                        text = "\u200E$activePhone ✓",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = Color(0xFF00E676),
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        color = Color(0xFF81C784)
                                     )
                                 }
                             }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            Surface(
+                                color = Color(0x3300E676),
+                                shape = RoundedCornerShape(8.dp)
                             ) {
-                                OutlinedButton(
-                                    onClick = onSignOutClick,
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("settings_sign_out_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Logout,
-                                        contentDescription = tr(appLanguage, "خروج از حساب", "Sign Out"),
-                                        tint = AccentGold,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(tr(appLanguage, "خروج از حساب", "Sign Out"))
-                                }
-
-                                OutlinedButton(
-                                    onClick = { showDeleteAccountDialog = true },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentOrange),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("settings_delete_account_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DeleteForever,
-                                        contentDescription = tr(appLanguage, "حذف حساب", "Delete Account"),
-                                        tint = AccentOrange,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(tr(appLanguage, "حذف حساب", "Delete Account"))
-                                }
+                                Text(
+                                    text = tr(appLanguage, "تایید شده", "Verified"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF00E676),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
                             }
                         }
 
-                        else -> {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                        Button(
+                            onClick = onOpenProfileClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentGold,
+                                contentColor = Color.Black
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_open_profile_btn")
+                        ) {
+                            Text(
+                                text = tr(
+                                    appLanguage,
+                                    "ویرایش پروفایل کاربری و تنظیمات Google Drive",
+                                    "Edit User Profile & Google Drive Settings"
+                                ),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onSignOutClick,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_sign_out_btn")
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = tr(appLanguage, "ورود یا ثبت‌نام با ایمیل", "Sign In or Create Account"),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = TextPrimary,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                Icon(
+                                    imageVector = Icons.Default.Logout,
+                                    contentDescription = tr(appLanguage, "خروج از حساب", "Sign Out"),
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(tr(appLanguage, "خروج از حساب", "Sign Out"))
+                            }
+
+                            OutlinedButton(
+                                onClick = { showDeleteAccountDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentOrange),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_delete_account_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteForever,
+                                    contentDescription = tr(appLanguage, "حذف حساب", "Delete Account"),
+                                    tint = AccentOrange,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(tr(appLanguage, "حذف حساب", "Delete Account"))
+                            }
+                        }
+                    } else {
+                        if (isTrialActive && trialRemainingMs > 0L) {
+                            val remainingText = com.example.data.model.AppConfig.formatTrialRemaining(
+                                trialRemainingMs,
+                                appLanguage
+                            )
+                            Surface(
+                                color = Color(0x33E53935),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, Color(0xFFE53935), RoundedCornerShape(12.dp))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
                                     Text(
                                         text = tr(
                                             appLanguage,
-                                            "برای ذخیره اختصاصی علاقه‌مندی‌ها و پلی‌لیست‌ها وارد شوید",
-                                            "Sign in to save your personal favorites and playlists"
+                                            "حالت آزمایشی ۳ روزه فعال ($remainingText)",
+                                            "3-Day Free Trial Active ($remainingText)"
+                                        ),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color(0xFFFF8A80),
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = tr(
+                                            appLanguage,
+                                            "شما بدون ثبت اکانت وارد شده‌اید. هر زمان مایل بودید می‌توانید حساب گوگل خود را متصل کنید.",
+                                            "You are using the 3-day trial without an account. Sign in with Google anytime to save your profile."
                                         ),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextSecondary
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Button(
-                                    onClick = onSignInClick,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = AccentGold,
-                                        contentColor = Color.Black
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = tr(appLanguage, "ورود با حساب گوگل", "Sign In with Google"),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = tr(
+                                        appLanguage,
+                                        "برای همگام‌سازی دائمی پروفایل در Google Drive وارد شوید",
+                                        "Sign in to permanently sync your profile with Google Drive"
                                     ),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.testTag("settings_sign_in_btn")
-                                ) {
-                                    Text(
-                                        text = tr(appLanguage, "ورود / ثبت‌نام", "Sign In"),
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Button(
+                                onClick = onSignInClick,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AccentGold,
+                                    contentColor = Color.Black
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.testTag("settings_sign_in_btn")
+                            ) {
+                                Text(
+                                    text = tr(appLanguage, "ورود گوگل", "Sign In"),
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
